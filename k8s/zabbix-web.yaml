@@ -1,0 +1,89 @@
+# Zabbix Web Frontend
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zabbix-web
+  namespace: zabbix
+  labels:
+    app: zabbix-web
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: zabbix-web
+  template:
+    metadata:
+      labels:
+        app: zabbix-web
+    spec:
+      containers:
+      - name: zabbix-web
+        image: zabbix/zabbix-web-nginx-mysql:6.0-alpine-latest
+        ports:
+        - containerPort: 8080
+          name: http
+        - containerPort: 8443
+          name: https
+        env:
+        - name: ZBX_SERVER_HOST
+          value: "zabbix-server"
+        - name: DB_SERVER_HOST
+          value: "zabbix-mysql"
+        - name: MYSQL_DATABASE
+          value: "zabbix"
+        - name: MYSQL_USER
+          value: "zabbix"
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: zabbix-db-secret
+              key: mysql-password
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: zabbix-db-secret
+              key: mysql-root-password
+        - name: ZBX_SERVER_NAME
+          value: "Zabbix Server - dal2-devmon-mgt.forescout.com"
+        - name: PHP_TZ
+          value: "America/Chicago"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+
+---
+# Zabbix Web Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: zabbix-web
+  namespace: zabbix
+  labels:
+    app: zabbix-web
+spec:
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+  - name: https
+    port: 443
+    targetPort: 8443
+  selector:
+    app: zabbix-web
+  type: ClusterIP

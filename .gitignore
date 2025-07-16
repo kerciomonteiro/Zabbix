@@ -1,0 +1,48 @@
+# Azure Developer CLI
+.azure/
+.env
+*.env
+
+# Build outputs
+bin/
+obj/
+out/
+target/
+
+# Dependencies
+node_modules/
+.venv/
+venv/
+__pycache__/
+
+# IDE
+.vs/
+.vscode/settings.json
+.vscode/launch.json
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+
+# Secrets and certificates
+*.pfx
+*.p12
+*.key
+*.pem
+*.crt
+secrets/
+
+# Azure specific
+.azure-pipelines/
+azuredeploy.parameters.local.json
