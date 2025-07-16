@@ -37,12 +37,12 @@ echo "✅ Resource group '$RESOURCE_GROUP' exists"
 # Create service principal
 echo "👤 Creating service principal..."
 echo "   Name: $SP_NAME"
-echo "   Scope: /subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP"
+echo "   Scope: /subscriptions/$SUBSCRIPTION_ID"
 
 SP_JSON=$(az ad sp create-for-rbac \
   --name "$SP_NAME" \
   --role "Contributor" \
-  --scopes "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP" \
+  --scopes "/subscriptions/$SUBSCRIPTION_ID" \
   --sdk-auth)
 
 echo ""
