@@ -18,8 +18,8 @@ resource "azurerm_kubernetes_cluster" "main" {
     vnet_subnet_id     = azurerm_subnet.aks.id
     max_pods           = 110
     
-    # System node pool should be in zones for HA
-    zones = ["1", "2", "3"]
+    # System node pool should be in zones for HA (eastus supports zones 2,3)
+    zones = ["2", "3"]
     
     # Node labels for system workloads
     node_labels = {
@@ -108,8 +108,8 @@ resource "azurerm_kubernetes_cluster_node_pool" "user" {
   min_count  = var.enable_auto_scaling ? var.aks_user_node_min_count : null
   max_count  = var.enable_auto_scaling ? var.aks_user_node_max_count : null
   
-  # High availability across zones
-  zones = ["1", "2", "3"]
+  # High availability across zones (eastus supports zones 2,3)
+  zones = ["2", "3"]
   
   # Node configuration
   max_pods = 110
