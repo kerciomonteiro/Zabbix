@@ -44,6 +44,33 @@ Internet
 └─────────────────┘
 ```
 
+## 📋 Resource Naming Convention
+
+This deployment follows a standardized DevOps naming convention for all Azure resources:
+
+**Pattern**: `resourcename-devops-regionname`
+
+### Example Resource Names (East US region):
+- AKS Cluster: `aks-devops-eastus`
+- Virtual Network: `vnet-devops-eastus`
+- Application Gateway: `appgw-devops-eastus`
+- Container Registry: `acr{envname}devopseastus`
+- Log Analytics Workspace: `law-devops-eastus`
+- Public IP: `pip-appgw-devops-eastus`
+- Network Security Groups: `nsg-aks-devops-eastus`, `nsg-appgw-devops-eastus`
+
+### Benefits:
+- **Consistency**: All resources follow the same pattern
+- **Readability**: Easy to identify resource type, purpose, and region
+- **Organization**: Clear grouping by environment and location
+- **Scalability**: Simple to extend to multiple regions/environments
+
+### Environment Naming:
+The GitHub Actions workflow creates environments with the pattern:
+`zabbix-devops-{region}-{run-number}[-suffix]`
+
+Example: `zabbix-devops-eastus-123` or `zabbix-devops-eastus-123-staging`
+
 ## 🚀 Quick Start
 
 ### Prerequisites
