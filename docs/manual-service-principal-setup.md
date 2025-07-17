@@ -357,51 +357,32 @@ az deployment group create \
 
 ### Error: "The content for this response was already consumed"
 
-This is a generic Azure CLI error that often indicates a problem with the Bicep template deployment or Azure resource provisioning.
+This is a critical Azure CLI error that requires comprehensive troubleshooting. The deployment workflow now includes multiple strategies to handle this error.
 
-**Example Error:**
+**📋 See the comprehensive troubleshooting guide**: [`azure-cli-troubleshooting.md`](azure-cli-troubleshooting.md)
+
+**Quick Summary of Solutions**:
+1. **Automatic retry logic** with exponential backoff
+2. **Azure CLI cache clearing** between attempts
+3. **PowerShell fallback deployment** method
+4. **Enhanced error handling** and timeout management
+
+**Current Workflow Behavior**:
+The deployment automatically attempts these methods in order:
+1. Azure Developer CLI (AZD)
+2. Azure CLI with enhanced retry logic
+3. Azure PowerShell (final fallback)
+
+**If you continue to see this error**:
+- The workflow will automatically try all fallback methods
+- Check the detailed troubleshooting guide for additional manual methods
+- Consider using the local template testing script: `scripts/test-template-local.sh`
+
+**Manual Recovery Options**:
+```bash
+# Test template locally first
+./scripts/test-template-local.sh
+
+# Use PowerShell fallback manually
+./scripts/deploy-infrastructure-pwsh.ps1 -ResourceGroupName "Devops-Test" -Location "eastus" -EnvironmentName "zabbix-aks-manual"
 ```
-ERROR: The content for this response was already consumed
-Error: Process completed with exit code 1.
-```
-
-**Common Causes**:
-1. **Template Syntax Issues**: Problems with Bicep template syntax or resource definitions
-2. **Resource Naming Conflicts**: Attempting to create resources with names that already exist
-3. **Permission Issues**: Service principal lacks sufficient permissions for specific resource types
-4. **Resource Provider Issues**: Azure resource providers not properly registered
-5. **Quota Limitations**: Subscription has reached resource quotas
-
-**Troubleshooting Steps**:
-
-1. **Check Template Validation**: The workflow now includes template validation for better error reporting:
-   ```bash
-   az deployment group validate \
-     --resource-group Devops-Test \
-     --template-file infra/main.bicep \
-     --parameters environmentName="..." location="eastus"
-   ```
-
-2. **Review Verbose Output**: The workflow captures detailed error information for analysis.
-
-3. **Check Resource Quotas**: Verify your subscription has sufficient quota for:
-   - AKS clusters
-   - Virtual networks
-   - Container registries
-   - Application gateways
-
-4. **Verify Resource Names**: Ensure resource names are unique and follow Azure naming conventions.
-
-5. **Check Resource Providers**: Ensure required providers are registered:
-   ```bash
-   az provider register --namespace Microsoft.ContainerService
-   az provider register --namespace Microsoft.Network
-   az provider register --namespace Microsoft.ContainerRegistry
-   ```
-
-**Resolution**: The workflow has been enhanced with:
-- Verbose error output and validation
-- Improved Bicep template with better error handling
-- Automatic resource name uniqueness using resource tokens
-
-If this error persists, check the detailed error output in the GitHub Actions logs for specific guidance.
