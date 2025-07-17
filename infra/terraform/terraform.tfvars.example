@@ -16,7 +16,7 @@ environment_name   = "zabbix-devops-eastus-001"
 create_role_assignments = false
 
 # AKS Configuration
-kubernetes_version = "1.29.9"
+kubernetes_version = "1.31.2"
 
 # System Node Pool (required for AKS)
 aks_system_node_count = 2
