@@ -237,6 +237,13 @@ jobs:
         ACR_NAME="acrzabbixdevops${{ env.AZURE_LOCATION }}"
         terraform import azurerm_container_registry.main "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.ContainerRegistry/registries/$ACR_NAME" 2>/dev/null || echo "⚠️ Container registry doesn't exist or already imported"
         
+        # Import Application Gateway
+        terraform import azurerm_application_gateway.main "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.Network/applicationGateways/appgw-devops-${{ env.AZURE_LOCATION }}" 2>/dev/null || echo "⚠️ Application Gateway doesn't exist or already imported"
+        
+        # Import NSG associations 
+        terraform import azurerm_subnet_network_security_group_association.aks "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.Network/virtualNetworks/vnet-devops-${{ env.AZURE_LOCATION }}/subnets/subnet-aks-devops-${{ env.AZURE_LOCATION }}" 2>/dev/null || echo "⚠️ AKS NSG association doesn't exist or already imported"
+        terraform import azurerm_subnet_network_security_group_association.appgw "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.Network/virtualNetworks/vnet-devops-${{ env.AZURE_LOCATION }}/subnets/subnet-appgw-devops-${{ env.AZURE_LOCATION }}" 2>/dev/null || echo "⚠️ App Gateway NSG association doesn't exist or already imported"
+        
         set -e  # Re-enable exit on error
         echo "✅ Import attempts completed"
         
