@@ -6,9 +6,10 @@ resource "azurerm_application_gateway" "main" {
   tags                = local.common_tags
 
   sku {
-    name     = "Standard_v2"
-    tier     = "Standard_v2"
-    capacity = 2
+    name = "Standard_v2"
+    tier = "Standard_v2"
+    # Note: For v2 SKUs, use either capacity OR autoscale_configuration, not both
+    # We're using autoscale_configuration below, so capacity is omitted
   }
 
   # Gateway IP Configuration
