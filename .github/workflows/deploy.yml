@@ -131,52 +131,181 @@ jobs:
           echo "DEPLOYMENT_SUCCESS=false" >> $GITHUB_OUTPUT
         fi
 
+    - name: Pre-deployment Diagnostics
+      if: steps.deploy-infra-azd.outputs.DEPLOYMENT_SUCCESS != 'true'
+      run: |
+        echo "🔍 Running pre-deployment diagnostics..."
+        
+        # Check resource group access
+        echo "Checking resource group access..."
+        az group show --name ${{ env.AZURE_RESOURCE_GROUP }} --output table || {
+          echo "❌ Cannot access resource group ${{ env.AZURE_RESOURCE_GROUP }}"
+          exit 1
+        }
+        
+        # Check resource providers
+        echo "Checking required resource providers..."
+        REQUIRED_PROVIDERS="Microsoft.ContainerService Microsoft.Network Microsoft.ContainerRegistry Microsoft.ManagedIdentity Microsoft.OperationalInsights"
+        for provider in $REQUIRED_PROVIDERS; do
+          STATUS=$(az provider show --namespace $provider --query registrationState -o tsv)
+          echo "  $provider: $STATUS"
+          if [ "$STATUS" != "Registered" ]; then
+            echo "⚠️ Registering provider $provider..."
+            az provider register --namespace $provider --wait
+          fi
+        done
+        
+        # Check for naming conflicts
+        echo "Checking for potential resource naming conflicts..."
+        ENV_NAME="zabbix-aks-${{ github.run_number }}"
+        RESOURCE_TOKEN=$(echo -n "${{ env.AZURE_SUBSCRIPTION_ID }}${{ env.AZURE_RESOURCE_GROUP }}$ENV_NAME" | sha256sum | cut -c1-8)
+        POTENTIAL_ACR_NAME="acr${ENV_NAME//-/}${RESOURCE_TOKEN}"
+        
+        echo "Environment name: $ENV_NAME"
+        echo "Resource token: $RESOURCE_TOKEN"
+        echo "Potential ACR name: $POTENTIAL_ACR_NAME"
+        
+        # Check if ACR name is available
+        if az acr check-name --name "$POTENTIAL_ACR_NAME" --query nameAvailable -o tsv | grep -q "false"; then
+          echo "⚠️ ACR name $POTENTIAL_ACR_NAME may not be available"
+        else
+          echo "✅ ACR name appears to be available"
+        fi
+
+    - name: Validate Bicep Template
+      if: steps.deploy-infra-azd.outputs.DEPLOYMENT_SUCCESS != 'true'
+      run: |
+        echo "🔍 Validating Bicep template..."
+        
+        # First, validate the template syntax
+        echo "Checking template syntax..."
+        az bicep build --file infra/main.bicep --stdout > /dev/null || {
+          echo "❌ Bicep template has syntax errors"
+          exit 1
+        }
+        echo "✅ Template syntax is valid"
+        
+        # Run what-if analysis to see what would be deployed
+        echo "Running what-if analysis..."
+        DEPLOYMENT_NAME="zabbix-validation-${{ github.run_number }}"
+        
+        # Use what-if to validate without deploying
+        az deployment group what-if \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --template-file infra/main.bicep \
+          --parameters environmentName="zabbix-aks-${{ github.run_number }}" \
+                       location="${{ env.AZURE_LOCATION }}" \
+          --name "$DEPLOYMENT_NAME" || {
+          echo "❌ What-if analysis failed"
+          exit 1
+        }
+        echo "✅ What-if analysis completed successfully"
+
     - name: Provision Infrastructure with Azure CLI (Fallback)
       id: deploy-infra-cli
       if: steps.deploy-infra-azd.outputs.DEPLOYMENT_SUCCESS != 'true'
       run: |
         echo "🚀 Deploying infrastructure using Azure CLI (AZD fallback)..."
         
-        # Generate deployment name
-        DEPLOYMENT_NAME="zabbix-deployment-${{ github.run_number }}"
+        # Generate deployment name with timestamp to avoid conflicts
+        TIMESTAMP=$(date +%s)
+        DEPLOYMENT_NAME="zabbix-deploy-${{ github.run_number }}-$TIMESTAMP"
+        echo "Deployment name: $DEPLOYMENT_NAME"
         
-        # Deploy Bicep template with error handling
+        # Deploy Bicep template with improved error handling and retry logic
         echo "🏗️ Deploying Bicep template..."
-        
-        # For service principal authentication, we don't need to pass principalId
-        # The Bicep template will skip user role assignments when principalId is empty
         echo "ℹ️ Deploying with service principal authentication (no user principal ID needed)"
         
-        # Add more verbose output and error handling
-        set +e  # Don't exit on error so we can capture the output
-        DEPLOYMENT_OUTPUT=$(az deployment group create \
-          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-          --template-file infra/main.bicep \
-          --parameters environmentName="zabbix-aks-${{ github.run_number }}" \
-                       location="${{ env.AZURE_LOCATION }}" \
-          --name "$DEPLOYMENT_NAME" \
-          --output json \
-          --verbose 2>&1)
-        DEPLOYMENT_EXIT_CODE=$?
-        set -e  # Re-enable exit on error
+        # Function to attempt deployment with retry logic
+        deploy_with_retry() {
+          local attempt=1
+          local max_attempts=3
+          local delay=30
+          
+          while [ $attempt -le $max_attempts ]; do
+            echo "🔄 Deployment attempt $attempt of $max_attempts..."
+            
+            # Clear any existing Azure CLI cache to avoid "content consumed" errors
+            rm -rf ~/.azure/azureProfile.json ~/.azure/clouds.config 2>/dev/null || true
+            
+            # Re-authenticate to ensure fresh tokens
+            az account show > /dev/null || {
+              echo "❌ Authentication lost, attempting to re-authenticate..."
+              exit 1
+            }
+            
+            # Set deployment timeout and try deployment
+            export AZURE_HTTP_USER_AGENT="GitHub-Actions-Zabbix-Deploy"
+            
+            set +e  # Don't exit on error
+            DEPLOYMENT_OUTPUT=$(timeout 1800 az deployment group create \
+              --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+              --template-file infra/main.bicep \
+              --parameters environmentName="zabbix-aks-${{ github.run_number }}" \
+                           location="${{ env.AZURE_LOCATION }}" \
+              --name "$DEPLOYMENT_NAME" \
+              --mode Incremental \
+              --output json \
+              --only-show-errors 2>&1)
+            DEPLOYMENT_EXIT_CODE=$?
+            set -e  # Re-enable exit on error
+            
+            if [ $DEPLOYMENT_EXIT_CODE -eq 0 ]; then
+              echo "✅ Deployment successful on attempt $attempt"
+              echo "$DEPLOYMENT_OUTPUT"
+              return 0
+            else
+              echo "❌ Deployment attempt $attempt failed with exit code $DEPLOYMENT_EXIT_CODE"
+              echo "Error output:"
+              echo "$DEPLOYMENT_OUTPUT"
+              
+              # Check if it's a retryable error
+              if echo "$DEPLOYMENT_OUTPUT" | grep -i "content.*already.*consumed\|timeout\|network\|connection"; then
+                if [ $attempt -lt $max_attempts ]; then
+                  echo "⏳ Retryable error detected. Waiting ${delay}s before retry..."
+                  sleep $delay
+                  delay=$((delay * 2))  # Exponential backoff
+                  attempt=$((attempt + 1))
+                  
+                  # Try with a new deployment name to avoid conflicts
+                  DEPLOYMENT_NAME="zabbix-deploy-${{ github.run_number }}-$(date +%s)"
+                  echo "Using new deployment name: $DEPLOYMENT_NAME"
+                  continue
+                fi
+              fi
+              
+              echo "❌ Non-retryable error or max attempts reached"
+              return $DEPLOYMENT_EXIT_CODE
+            fi
+          done
+        }
         
-        if [ $DEPLOYMENT_EXIT_CODE -ne 0 ]; then
-          echo "❌ Bicep deployment failed with exit code $DEPLOYMENT_EXIT_CODE"
-          echo "Error output:"
-          echo "$DEPLOYMENT_OUTPUT"
+        # Attempt deployment with retry logic
+        if ! deploy_with_retry; then
           echo ""
-          echo "Attempting deployment validation..."
+          echo "❌ All deployment attempts failed. Running final diagnostics..."
+          
+          # Try validation as a last resort to get better error info
+          echo "Running template validation for error details..."
           az deployment group validate \
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
             --template-file infra/main.bicep \
             --parameters environmentName="zabbix-aks-${{ github.run_number }}" \
                          location="${{ env.AZURE_LOCATION }}" \
-            --verbose || echo "Validation also failed"
+            --output json 2>&1 | jq '.' || echo "Validation also failed"
+          
           exit 1
         fi
         
         # Extract outputs with validation
         echo "📋 Extracting deployment outputs..."
+        if ! echo "$DEPLOYMENT_OUTPUT" | jq . > /dev/null 2>&1; then
+          echo "❌ Deployment output is not valid JSON"
+          echo "Raw output:"
+          echo "$DEPLOYMENT_OUTPUT"
+          exit 1
+        fi
+        
         AKS_CLUSTER_NAME=$(echo "$DEPLOYMENT_OUTPUT" | jq -r '.properties.outputs.AKS_CLUSTER_NAME.value // empty')
         CONTAINER_REGISTRY_ENDPOINT=$(echo "$DEPLOYMENT_OUTPUT" | jq -r '.properties.outputs.CONTAINER_REGISTRY_ENDPOINT.value // empty')
         
@@ -202,6 +331,23 @@ jobs:
         echo "   Resource Group: ${{ env.AZURE_RESOURCE_GROUP }}"
         echo "   Container Registry: $CONTAINER_REGISTRY_ENDPOINT"
 
+    - name: Provision Infrastructure with PowerShell (Final Fallback)
+      id: deploy-infra-pwsh
+      if: steps.deploy-infra-azd.outputs.DEPLOYMENT_SUCCESS != 'true' && steps.deploy-infra-cli.outputs.DEPLOYMENT_SUCCESS != 'true'
+      shell: pwsh
+      run: |
+        Write-Host "🚀 Attempting deployment with Azure PowerShell (final fallback)..." -ForegroundColor Cyan
+        
+        # Make script executable and run it
+        $scriptPath = Join-Path $env:GITHUB_WORKSPACE "scripts" "deploy-infrastructure-pwsh.ps1"
+        
+        if (Test-Path $scriptPath) {
+          & $scriptPath -ResourceGroupName "${{ env.AZURE_RESOURCE_GROUP }}" -Location "${{ env.AZURE_LOCATION }}" -EnvironmentName "zabbix-aks-${{ github.run_number }}" -SubscriptionId "${{ env.AZURE_SUBSCRIPTION_ID }}"
+        } else {
+          Write-Host "❌ PowerShell deployment script not found at: $scriptPath" -ForegroundColor Red
+          exit 1
+        }
+
     - name: Set Infrastructure Outputs
       id: deploy-infra
       run: |
@@ -219,6 +365,22 @@ jobs:
           echo "AZURE_RESOURCE_GROUP=${{ steps.deploy-infra-cli.outputs.AZURE_RESOURCE_GROUP }}" >> $GITHUB_OUTPUT
           echo "CONTAINER_REGISTRY_ENDPOINT=${{ steps.deploy-infra-cli.outputs.CONTAINER_REGISTRY_ENDPOINT }}" >> $GITHUB_OUTPUT
           echo "DEPLOYMENT_SUCCESS=true" >> $GITHUB_OUTPUT
+          echo "✅ Used Azure CLI for deployment (AZD fallback)" >> $GITHUB_STEP_SUMMARY
+        elif [ "${{ steps.deploy-infra-pwsh.outputs.DEPLOYMENT_SUCCESS }}" = "true" ]; then
+          echo "Using Azure PowerShell deployment outputs"
+          echo "AKS_CLUSTER_NAME=${{ steps.deploy-infra-pwsh.outputs.AKS_CLUSTER_NAME }}" >> $GITHUB_OUTPUT
+          echo "AZURE_RESOURCE_GROUP=${{ steps.deploy-infra-pwsh.outputs.AZURE_RESOURCE_GROUP }}" >> $GITHUB_OUTPUT
+          echo "CONTAINER_REGISTRY_ENDPOINT=${{ steps.deploy-infra-pwsh.outputs.CONTAINER_REGISTRY_ENDPOINT }}" >> $GITHUB_OUTPUT
+          echo "DEPLOYMENT_SUCCESS=true" >> $GITHUB_OUTPUT
+          echo "✅ Used Azure PowerShell for deployment (final fallback)" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ All deployment methods failed or returned empty outputs" >> $GITHUB_STEP_SUMMARY
+          echo "AZD success: ${{ steps.deploy-infra-azd.outputs.DEPLOYMENT_SUCCESS }}"
+          echo "CLI success: ${{ steps.deploy-infra-cli.outputs.DEPLOYMENT_SUCCESS }}"
+          echo "PowerShell success: ${{ steps.deploy-infra-pwsh.outputs.DEPLOYMENT_SUCCESS }}"
+          echo "DEPLOYMENT_SUCCESS=false" >> $GITHUB_OUTPUT
+          exit 1
+        fi
           echo "✅ Used Azure CLI for deployment (AZD fallback)" >> $GITHUB_STEP_SUMMARY
         else
           echo "❌ Both AZD and Azure CLI deployments failed or returned empty outputs" >> $GITHUB_STEP_SUMMARY

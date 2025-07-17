@@ -291,6 +291,74 @@ The GitHub Actions workflow includes:
 - Pull requests to `main`
 - Manual workflow dispatch
 
+## 🛠️ Troubleshooting and Testing
+
+### Local Template Testing
+
+Before deploying, you can test the Bicep template locally:
+
+```bash
+# Make script executable
+chmod +x scripts/test-template-local.sh
+
+# Run full validation
+./scripts/test-template-local.sh
+
+# Run syntax validation only
+./scripts/test-template-local.sh --syntax-only
+
+# Run what-if analysis only
+./scripts/test-template-local.sh --whatif-only
+```
+
+### Common Issues and Solutions
+
+#### "Content Already Consumed" Error
+This Azure CLI error is addressed with multiple fallback strategies:
+
+1. **Azure CLI with retry logic** (primary fallback)
+2. **Azure PowerShell** (final fallback)
+3. **Enhanced error handling** with cache clearing
+
+See [`docs/azure-cli-troubleshooting.md`](docs/azure-cli-troubleshooting.md) for detailed troubleshooting.
+
+#### Authentication Issues
+- Verify `AZURE_CREDENTIALS` secret format
+- Check service principal permissions
+- Ensure subscription ID is correct
+
+#### Resource Naming Conflicts
+- The template uses resource tokens for unique naming
+- Check Azure Container Registry name availability
+- Use different environment names if conflicts occur
+
+#### Deployment Validation Failures
+- Run template validation locally first
+- Check resource provider registration
+- Verify quota availability in target region
+
+### Manual Fallback Deployment
+
+If automated deployment fails, use the PowerShell script:
+
+```powershell
+# Install Azure PowerShell
+Install-Module -Name Az -Force
+
+# Run deployment
+./scripts/deploy-infrastructure-pwsh.ps1 -ResourceGroupName "Devops-Test" -Location "eastus" -EnvironmentName "zabbix-aks-manual" -SubscriptionId "d9b2a1cf-f99b-4f9e-a6cf-c79a078406bf"
+```
+
+### Monitoring Deployment
+
+The workflow includes comprehensive monitoring:
+- Pre-deployment diagnostics
+- Resource provider checks
+- Naming conflict detection
+- Template validation
+- Deployment retry logic
+- Multiple fallback methods
+
 ## 🆘 Troubleshooting
 
 ### Common Issues

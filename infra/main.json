@@ -1,0 +1,659 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.36.177.2456",
+      "templateHash": "7174688542379339425"
+    }
+  },
+  "parameters": {
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Deployment location"
+      }
+    },
+    "environmentName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "metadata": {
+        "description": "Deployment environment name"
+      }
+    },
+    "principalId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Principal ID of the deployment user for role assignments"
+      }
+    }
+  },
+  "variables": {
+    "resourceToken": "[take(uniqueString(subscription().id, resourceGroup().id, parameters('environmentName')), 8)]",
+    "resourceNames": {
+      "vnet": "[format('vnet-{0}', variables('resourceToken'))]",
+      "aksCluster": "[format('aks-{0}', variables('resourceToken'))]",
+      "aksNodeRg": "[format('rg-{0}-aks-nodes-{1}', parameters('environmentName'), variables('resourceToken'))]",
+      "subnet": {
+        "aks": "[format('subnet-aks-{0}', variables('resourceToken'))]",
+        "appgw": "[format('subnet-appgw-{0}', variables('resourceToken'))]"
+      },
+      "identity": "[format('id-{0}', variables('resourceToken'))]",
+      "logAnalytics": "[format('law-{0}', variables('resourceToken'))]",
+      "containerRegistry": "[format('acr{0}{1}', toLower(replace(replace(parameters('environmentName'), '-', ''), '_', '')), variables('resourceToken'))]",
+      "appGateway": "[format('appgw-{0}', variables('resourceToken'))]",
+      "publicIp": "[format('pip-appgw-{0}', variables('resourceToken'))]",
+      "nsg": {
+        "aks": "[format('nsg-aks-{0}', variables('resourceToken'))]",
+        "appgw": "[format('nsg-appgw-{0}', variables('resourceToken'))]"
+      }
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Network/virtualNetworks",
+      "apiVersion": "2024-05-01",
+      "name": "[variables('resourceNames').vnet]",
+      "location": "[parameters('location')]",
+      "tags": {
+        "azd-env-name": "[parameters('environmentName')]"
+      },
+      "properties": {
+        "addressSpace": {
+          "addressPrefixes": [
+            "10.224.0.0/12"
+          ]
+        },
+        "subnets": [
+          {
+            "name": "[variables('resourceNames').subnet.aks]",
+            "properties": {
+              "addressPrefix": "10.224.0.0/16",
+              "networkSecurityGroup": {
+                "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('resourceNames').nsg.aks)]"
+              }
+            }
+          },
+          {
+            "name": "[variables('resourceNames').subnet.appgw]",
+            "properties": {
+              "addressPrefix": "10.225.0.0/24",
+              "networkSecurityGroup": {
+                "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('resourceNames').nsg.appgw)]"
+              }
+            }
+          }
+        ]
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/networkSecurityGroups', variables('resourceNames').nsg.aks)]",
+        "[resourceId('Microsoft.Network/networkSecurityGroups', variables('resourceNames').nsg.appgw)]"
+      ]
+    },
+    {
+      "type": "Microsoft.Network/networkSecurityGroups",
+      "apiVersion": "2024-05-01",
+      "name": "[variables('resourceNames').nsg.aks]",
+      "location": "[parameters('location')]",
+      "tags": {
+        "azd-env-name": "[parameters('environmentName')]"
+      },
+      "properties": {
+        "securityRules": [
+          {
+            "name": "AllowAKSApiServer",
+            "properties": {
+              "protocol": "Tcp",
+              "sourcePortRange": "*",
+              "destinationPortRange": "443",
+              "sourceAddressPrefix": "*",
+              "destinationAddressPrefix": "*",
+              "access": "Allow",
+              "priority": 100,
+              "direction": "Inbound"
+            }
+          },
+          {
+            "name": "AllowSSH",
+            "properties": {
+              "protocol": "Tcp",
+              "sourcePortRange": "*",
+              "destinationPortRange": "22",
+              "sourceAddressPrefix": "*",
+              "destinationAddressPrefix": "*",
+              "access": "Allow",
+              "priority": 110,
+              "direction": "Inbound"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Network/networkSecurityGroups",
+      "apiVersion": "2024-05-01",
+      "name": "[variables('resourceNames').nsg.appgw]",
+      "location": "[parameters('location')]",
+      "tags": {
+        "azd-env-name": "[parameters('environmentName')]"
+      },
+      "properties": {
+        "securityRules": [
+          {
+            "name": "AllowHTTP",
+            "properties": {
+              "protocol": "Tcp",
+              "sourcePortRange": "*",
+              "destinationPortRange": "80",
+              "sourceAddressPrefix": "*",
+              "destinationAddressPrefix": "*",
+              "access": "Allow",
+              "priority": 100,
+              "direction": "Inbound"
+            }
+          },
+          {
+            "name": "AllowHTTPS",
+            "properties": {
+              "protocol": "Tcp",
+              "sourcePortRange": "*",
+              "destinationPortRange": "443",
+              "sourceAddressPrefix": "*",
+              "destinationAddressPrefix": "*",
+              "access": "Allow",
+              "priority": 110,
+              "direction": "Inbound"
+            }
+          },
+          {
+            "name": "AllowAppGwManagement",
+            "properties": {
+              "protocol": "Tcp",
+              "sourcePortRange": "*",
+              "destinationPortRange": "65200-65535",
+              "sourceAddressPrefix": "GatewayManager",
+              "destinationAddressPrefix": "*",
+              "access": "Allow",
+              "priority": 120,
+              "direction": "Inbound"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+      "apiVersion": "2023-01-31",
+      "name": "[variables('resourceNames').identity]",
+      "location": "[parameters('location')]",
+      "tags": {
+        "azd-env-name": "[parameters('environmentName')]"
+      }
+    },
+    {
+      "type": "Microsoft.OperationalInsights/workspaces",
+      "apiVersion": "2023-09-01",
+      "name": "[variables('resourceNames').logAnalytics]",
+      "location": "[parameters('location')]",
+      "tags": {
+        "azd-env-name": "[parameters('environmentName')]"
+      },
+      "properties": {
+        "sku": {
+          "name": "PerGB2018"
+        },
+        "retentionInDays": 90,
+        "features": {
+          "enableLogAccessUsingOnlyResourcePermissions": true
+        }
+      }
+    },
+    {
+      "type": "Microsoft.ContainerRegistry/registries",
+      "apiVersion": "2023-07-01",
+      "name": "[variables('resourceNames').containerRegistry]",
+      "location": "[parameters('location')]",
+      "tags": {
+        "azd-env-name": "[parameters('environmentName')]"
+      },
+      "sku": {
+        "name": "Standard"
+      },
+      "properties": {
+        "adminUserEnabled": false,
+        "networkRuleSet": {
+          "defaultAction": "Allow"
+        },
+        "policies": {
+          "quarantinePolicy": {
+            "status": "disabled"
+          },
+          "trustPolicy": {
+            "type": "Notary",
+            "status": "disabled"
+          },
+          "retentionPolicy": {
+            "days": 7,
+            "status": "enabled"
+          }
+        },
+        "encryption": {
+          "status": "disabled"
+        },
+        "dataEndpointEnabled": false,
+        "publicNetworkAccess": "Enabled",
+        "zoneRedundancy": "Disabled"
+      }
+    },
+    {
+      "type": "Microsoft.Network/publicIPAddresses",
+      "apiVersion": "2024-05-01",
+      "name": "[variables('resourceNames').publicIp]",
+      "location": "[parameters('location')]",
+      "tags": {
+        "azd-env-name": "[parameters('environmentName')]"
+      },
+      "sku": {
+        "name": "Standard",
+        "tier": "Regional"
+      },
+      "properties": {
+        "publicIPAllocationMethod": "Static",
+        "dnsSettings": {
+          "domainNameLabel": "[format('dal2-devmon-mgt-{0}', variables('resourceToken'))]"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Network/applicationGateways",
+      "apiVersion": "2024-05-01",
+      "name": "[variables('resourceNames').appGateway]",
+      "location": "[parameters('location')]",
+      "tags": {
+        "azd-env-name": "[parameters('environmentName')]"
+      },
+      "properties": {
+        "sku": {
+          "name": "Standard_v2",
+          "tier": "Standard_v2",
+          "capacity": 2
+        },
+        "gatewayIPConfigurations": [
+          {
+            "name": "appGatewayIpConfig",
+            "properties": {
+              "subnet": {
+                "id": "[format('{0}/subnets/{1}', resourceId('Microsoft.Network/virtualNetworks', variables('resourceNames').vnet), variables('resourceNames').subnet.appgw)]"
+              }
+            }
+          }
+        ],
+        "frontendIPConfigurations": [
+          {
+            "name": "appGwPublicFrontendIp",
+            "properties": {
+              "privateIPAllocationMethod": "Dynamic",
+              "publicIPAddress": {
+                "id": "[resourceId('Microsoft.Network/publicIPAddresses', variables('resourceNames').publicIp)]"
+              }
+            }
+          }
+        ],
+        "frontendPorts": [
+          {
+            "name": "port_80",
+            "properties": {
+              "port": 80
+            }
+          },
+          {
+            "name": "port_443",
+            "properties": {
+              "port": 443
+            }
+          }
+        ],
+        "backendAddressPools": [
+          {
+            "name": "zabbixBackendPool",
+            "properties": {}
+          }
+        ],
+        "backendHttpSettingsCollection": [
+          {
+            "name": "defaultHttpSettings",
+            "properties": {
+              "port": 80,
+              "protocol": "Http",
+              "cookieBasedAffinity": "Disabled",
+              "pickHostNameFromBackendAddress": false,
+              "requestTimeout": 30
+            }
+          }
+        ],
+        "httpListeners": [
+          {
+            "name": "defaultHttpListener",
+            "properties": {
+              "frontendIPConfiguration": {
+                "id": "[resourceId('Microsoft.Network/applicationGateways/frontendIPConfigurations', variables('resourceNames').appGateway, 'appGwPublicFrontendIp')]"
+              },
+              "frontendPort": {
+                "id": "[resourceId('Microsoft.Network/applicationGateways/frontendPorts', variables('resourceNames').appGateway, 'port_80')]"
+              },
+              "protocol": "Http"
+            }
+          }
+        ],
+        "requestRoutingRules": [
+          {
+            "name": "defaultRoutingRule",
+            "properties": {
+              "ruleType": "Basic",
+              "priority": 1,
+              "httpListener": {
+                "id": "[resourceId('Microsoft.Network/applicationGateways/httpListeners', variables('resourceNames').appGateway, 'defaultHttpListener')]"
+              },
+              "backendAddressPool": {
+                "id": "[resourceId('Microsoft.Network/applicationGateways/backendAddressPools', variables('resourceNames').appGateway, 'zabbixBackendPool')]"
+              },
+              "backendHttpSettings": {
+                "id": "[resourceId('Microsoft.Network/applicationGateways/backendHttpSettingsCollection', variables('resourceNames').appGateway, 'defaultHttpSettings')]"
+              }
+            }
+          }
+        ],
+        "enableHttp2": false,
+        "autoscaleConfiguration": {
+          "minCapacity": 2,
+          "maxCapacity": 10
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/publicIPAddresses', variables('resourceNames').publicIp)]",
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('resourceNames').vnet)]"
+      ]
+    },
+    {
+      "type": "Microsoft.ContainerService/managedClusters",
+      "apiVersion": "2024-09-01",
+      "name": "[variables('resourceNames').aksCluster]",
+      "location": "[parameters('location')]",
+      "tags": {
+        "azd-env-name": "[parameters('environmentName')]",
+        "azd-service-name": "zabbix"
+      },
+      "identity": {
+        "type": "UserAssigned",
+        "userAssignedIdentities": {
+          "[format('{0}', resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('resourceNames').identity))]": {}
+        }
+      },
+      "properties": {
+        "dnsPrefix": "[format('aks-{0}', variables('resourceToken'))]",
+        "nodeResourceGroup": "[variables('resourceNames').aksNodeRg]",
+        "kubernetesVersion": "1.29.9",
+        "enableRBAC": true,
+        "disableLocalAccounts": false,
+        "agentPoolProfiles": [
+          {
+            "name": "systempool",
+            "count": 2,
+            "vmSize": "Standard_D2s_v3",
+            "osType": "Linux",
+            "osSKU": "Ubuntu",
+            "type": "VirtualMachineScaleSets",
+            "mode": "System",
+            "enableAutoScaling": true,
+            "minCount": 1,
+            "maxCount": 5,
+            "vnetSubnetID": "[format('{0}/subnets/{1}', resourceId('Microsoft.Network/virtualNetworks', variables('resourceNames').vnet), variables('resourceNames').subnet.aks)]",
+            "enableNodePublicIP": false,
+            "maxPods": 110,
+            "availabilityZones": [
+              "1",
+              "2",
+              "3"
+            ],
+            "upgradeSettings": {
+              "maxSurge": "1"
+            }
+          },
+          {
+            "name": "workerpool",
+            "count": 3,
+            "vmSize": "Standard_D4s_v3",
+            "osType": "Linux",
+            "osSKU": "Ubuntu",
+            "type": "VirtualMachineScaleSets",
+            "mode": "User",
+            "enableAutoScaling": true,
+            "minCount": 2,
+            "maxCount": 10,
+            "vnetSubnetID": "[format('{0}/subnets/{1}', resourceId('Microsoft.Network/virtualNetworks', variables('resourceNames').vnet), variables('resourceNames').subnet.aks)]",
+            "enableNodePublicIP": false,
+            "maxPods": 110,
+            "availabilityZones": [
+              "1",
+              "2",
+              "3"
+            ],
+            "upgradeSettings": {
+              "maxSurge": "1"
+            },
+            "nodeLabels": {
+              "workload-type": "application"
+            }
+          }
+        ],
+        "networkProfile": {
+          "networkPlugin": "azure",
+          "networkPolicy": "azure",
+          "outboundType": "loadBalancer",
+          "serviceCidr": "172.16.0.0/16",
+          "dnsServiceIP": "172.16.0.10",
+          "loadBalancerSku": "standard"
+        },
+        "apiServerAccessProfile": {
+          "enablePrivateCluster": false,
+          "authorizedIPRanges": []
+        },
+        "addonProfiles": {
+          "omsagent": {
+            "enabled": true,
+            "config": {
+              "logAnalyticsWorkspaceResourceID": "[resourceId('Microsoft.OperationalInsights/workspaces', variables('resourceNames').logAnalytics)]"
+            }
+          },
+          "azurepolicy": {
+            "enabled": true
+          },
+          "ingressApplicationGateway": {
+            "enabled": true,
+            "config": {
+              "applicationGatewayId": "[resourceId('Microsoft.Network/applicationGateways', variables('resourceNames').appGateway)]"
+            }
+          }
+        },
+        "autoUpgradeProfile": {
+          "upgradeChannel": "patch",
+          "nodeOSUpgradeChannel": "NodeImage"
+        },
+        "securityProfile": {
+          "workloadIdentity": {
+            "enabled": true
+          }
+        },
+        "oidcIssuerProfile": {
+          "enabled": true
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/applicationGateways', variables('resourceNames').appGateway)]",
+        "[resourceId('Microsoft.OperationalInsights/workspaces', variables('resourceNames').logAnalytics)]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('resourceNames').identity)]",
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('resourceNames').vnet)]"
+      ]
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "name": "[guid(resourceGroup().id, resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('resourceNames').identity), subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b24988ac-6180-42a0-ab88-20f7382dd24c'))]",
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b24988ac-6180-42a0-ab88-20f7382dd24c')]",
+        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('resourceNames').identity), '2023-01-31').principalId]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('resourceNames').identity)]"
+      ]
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[format('Microsoft.Network/virtualNetworks/{0}', variables('resourceNames').vnet)]",
+      "name": "[guid(resourceId('Microsoft.Network/virtualNetworks', variables('resourceNames').vnet), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('resourceNames').identity), subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4d97b98b-1d4f-4787-a291-c67834d212e7'))]",
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4d97b98b-1d4f-4787-a291-c67834d212e7')]",
+        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('resourceNames').identity), '2023-01-31').principalId]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('resourceNames').identity)]",
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('resourceNames').vnet)]"
+      ]
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[format('Microsoft.ContainerRegistry/registries/{0}', variables('resourceNames').containerRegistry)]",
+      "name": "[guid(resourceId('Microsoft.ContainerRegistry/registries', variables('resourceNames').containerRegistry), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('resourceNames').identity), subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d'))]",
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')]",
+        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('resourceNames').identity), '2023-01-31').principalId]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.ContainerRegistry/registries', variables('resourceNames').containerRegistry)]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('resourceNames').identity)]"
+      ]
+    },
+    {
+      "condition": "[not(empty(parameters('principalId')))]",
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "name": "[guid(resourceGroup().id, 'user-contributor', if(not(empty(parameters('principalId'))), parameters('principalId'), 'no-user'))]",
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b24988ac-6180-42a0-ab88-20f7382dd24c')]",
+        "principalId": "[parameters('principalId')]",
+        "principalType": "User"
+      }
+    }
+  ],
+  "outputs": {
+    "AZURE_LOCATION": {
+      "type": "string",
+      "value": "[parameters('location')]"
+    },
+    "AZURE_TENANT_ID": {
+      "type": "string",
+      "value": "[tenant().tenantId]"
+    },
+    "AZURE_SUBSCRIPTION_ID": {
+      "type": "string",
+      "value": "[subscription().subscriptionId]"
+    },
+    "AZURE_RESOURCE_GROUP": {
+      "type": "string",
+      "value": "[resourceGroup().name]"
+    },
+    "AKS_CLUSTER_NAME": {
+      "type": "string",
+      "value": "[variables('resourceNames').aksCluster]"
+    },
+    "AKS_CLUSTER_ID": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.ContainerService/managedClusters', variables('resourceNames').aksCluster)]"
+    },
+    "AKS_CLUSTER_FQDN": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.ContainerService/managedClusters', variables('resourceNames').aksCluster), '2024-09-01').fqdn]"
+    },
+    "AKS_CLUSTER_PORTAL_FQDN": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.ContainerService/managedClusters', variables('resourceNames').aksCluster), '2024-09-01').azurePortalFQDN]"
+    },
+    "AKS_CLUSTER_NODE_RESOURCE_GROUP": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.ContainerService/managedClusters', variables('resourceNames').aksCluster), '2024-09-01').nodeResourceGroup]"
+    },
+    "CONTAINER_REGISTRY_ENDPOINT": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.ContainerRegistry/registries', variables('resourceNames').containerRegistry), '2023-07-01').loginServer]"
+    },
+    "CONTAINER_REGISTRY_NAME": {
+      "type": "string",
+      "value": "[variables('resourceNames').containerRegistry]"
+    },
+    "VNET_ID": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.Network/virtualNetworks', variables('resourceNames').vnet)]"
+    },
+    "VNET_NAME": {
+      "type": "string",
+      "value": "[variables('resourceNames').vnet]"
+    },
+    "AKS_SUBNET_ID": {
+      "type": "string",
+      "value": "[format('{0}/subnets/{1}', resourceId('Microsoft.Network/virtualNetworks', variables('resourceNames').vnet), variables('resourceNames').subnet.aks)]"
+    },
+    "APPGW_SUBNET_ID": {
+      "type": "string",
+      "value": "[format('{0}/subnets/{1}', resourceId('Microsoft.Network/virtualNetworks', variables('resourceNames').vnet), variables('resourceNames').subnet.appgw)]"
+    },
+    "APPLICATION_GATEWAY_NAME": {
+      "type": "string",
+      "value": "[variables('resourceNames').appGateway]"
+    },
+    "APPLICATION_GATEWAY_ID": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.Network/applicationGateways', variables('resourceNames').appGateway)]"
+    },
+    "PUBLIC_IP_ADDRESS": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Network/publicIPAddresses', variables('resourceNames').publicIp), '2024-05-01').ipAddress]"
+    },
+    "PUBLIC_IP_FQDN": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Network/publicIPAddresses', variables('resourceNames').publicIp), '2024-05-01').dnsSettings.fqdn]"
+    },
+    "LOG_ANALYTICS_WORKSPACE_ID": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.OperationalInsights/workspaces', variables('resourceNames').logAnalytics)]"
+    },
+    "LOG_ANALYTICS_WORKSPACE_NAME": {
+      "type": "string",
+      "value": "[variables('resourceNames').logAnalytics]"
+    },
+    "USER_ASSIGNED_IDENTITY_ID": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('resourceNames').identity)]"
+    },
+    "USER_ASSIGNED_IDENTITY_CLIENT_ID": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('resourceNames').identity), '2023-01-31').clientId]"
+    },
+    "USER_ASSIGNED_IDENTITY_PRINCIPAL_ID": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('resourceNames').identity), '2023-01-31').principalId]"
+    },
+    "RESOURCE_GROUP_ID": {
+      "type": "string",
+      "value": "[resourceGroup().id]"
+    }
+  }
+}

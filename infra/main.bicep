@@ -26,7 +26,7 @@ var resourceNames = {
   }
   identity: 'id-${resourceToken}'
   logAnalytics: 'law-${resourceToken}'
-  containerRegistry: 'crzabbix${replace(resourceToken, '-', '')}'
+  containerRegistry: 'acr${toLower(replace(replace(environmentName, '-', ''), '_', ''))}${resourceToken}'
   appGateway: 'appgw-${resourceToken}'
   publicIp: 'pip-appgw-${resourceToken}'
   nsg: {
