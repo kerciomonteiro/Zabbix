@@ -234,11 +234,15 @@ jobs:
             if ! az account show --output none 2>/dev/null; then
               echo "❌ Authentication lost, re-authenticating with service principal..."
               # Re-authenticate using the stored credentials
-              echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r .clientSecret | az login \
+              CLIENT_ID=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r .clientId)
+              CLIENT_SECRET=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r .clientSecret)
+              TENANT_ID=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r .tenantId)
+              
+              az login \
                 --service-principal \
-                --username "$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r .clientId)" \
-                --tenant "$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r .tenantId)" \
-                --password-stdin > /dev/null
+                --username "$CLIENT_ID" \
+                --password "$CLIENT_SECRET" \
+                --tenant "$TENANT_ID" > /dev/null
               
               # Set the subscription
               az account set --subscription "${{ env.AZURE_SUBSCRIPTION_ID }}"
@@ -276,6 +280,8 @@ jobs:
               if echo "$DEPLOYMENT_OUTPUT" | grep -i "content.*already.*consumed"; then
                 echo "🚨 Detected 'content already consumed' error - this is a known Azure CLI session issue"
                 echo "⚡ Setting flag for immediate ARM template fallback..."
+                # Set environment variable in outer scope
+                export BICEP_FAILED_CONTENT_ERROR=true
                 echo "BICEP_FAILED_CONTENT_ERROR=true" >> $GITHUB_ENV
                 echo "❌ Bicep deployment failed due to Azure CLI session issue"
                 return 1
@@ -389,11 +395,15 @@ jobs:
         az account clear 2>/dev/null || true
         
         echo "🔐 Establishing fresh Azure CLI session for ARM deployment..."
-        echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r .clientSecret | az login \
+        CLIENT_ID=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r .clientId)
+        CLIENT_SECRET=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r .clientSecret)
+        TENANT_ID=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r .tenantId)
+        
+        az login \
           --service-principal \
-          --username "$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r .clientId)" \
-          --tenant "$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r .tenantId)" \
-          --password-stdin > /dev/null
+          --username "$CLIENT_ID" \
+          --password "$CLIENT_SECRET" \
+          --tenant "$TENANT_ID" > /dev/null
         
         az account set --subscription "${{ env.AZURE_SUBSCRIPTION_ID }}"
         echo "✅ Fresh session established"
@@ -510,11 +520,15 @@ jobs:
         echo "🔐 Verifying Azure authentication for ARM deployment..."
         if ! az account show --output none 2>/dev/null; then
           echo "❌ Authentication lost, re-authenticating..."
-          echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r .clientSecret | az login \
+          CLIENT_ID=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r .clientId)
+          CLIENT_SECRET=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r .clientSecret)
+          TENANT_ID=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r .tenantId)
+          
+          az login \
             --service-principal \
-            --username "$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r .clientId)" \
-            --tenant "$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r .tenantId)" \
-            --password-stdin > /dev/null
+            --username "$CLIENT_ID" \
+            --password "$CLIENT_SECRET" \
+            --tenant "$TENANT_ID" > /dev/null
           az account set --subscription "${{ env.AZURE_SUBSCRIPTION_ID }}"
         fi
         
