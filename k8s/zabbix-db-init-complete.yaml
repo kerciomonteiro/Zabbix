@@ -1,0 +1,83 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: zabbix-db-init
+  namespace: zabbix
+spec:
+  template:
+    metadata:
+      labels:
+        app: zabbix-db-init
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: zabbix-db-init
+        image: zabbix/zabbix-server-mysql:6.0-alpine-latest
+        env:
+        - name: DB_SERVER_HOST
+          value: "zabbix-mysql"
+        - name: MYSQL_DATABASE
+          value: "zabbix"
+        - name: MYSQL_USER
+          value: "zabbix"
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: zabbix-db-secret
+              key: mysql-password
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: zabbix-db-secret
+              key: mysql-root-password
+        command: 
+        - /bin/bash
+        - -c
+        - |
+          echo "🔄 Starting Zabbix database initialization..."
+          
+          # Wait for MySQL to be ready
+          echo "⏳ Waiting for MySQL to be ready..."
+          until mysql -h "$DB_SERVER_HOST" -u root -p"$MYSQL_ROOT_PASSWORD" -e "SELECT 1" > /dev/null 2>&1; do
+            echo "Still waiting for MySQL..."
+            sleep 10
+          done
+          echo "✅ MySQL is ready"
+          
+          # Check if database needs initialization
+          echo "🔍 Checking if database is already initialized..."
+          TABLE_COUNT=$(mysql -h "$DB_SERVER_HOST" -u "$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE" -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '$MYSQL_DATABASE';" 2>/dev/null || echo "0")
+          
+          if [ "$TABLE_COUNT" -lt 100 ]; then
+            echo "📊 Database needs initialization (only $TABLE_COUNT tables found)"
+            
+            # Drop and recreate database for clean initialization
+            echo "🗑️ Dropping existing database..."
+            mysql -h "$DB_SERVER_HOST" -u root -p"$MYSQL_ROOT_PASSWORD" -e "DROP DATABASE IF EXISTS $MYSQL_DATABASE;"
+            echo "📝 Creating fresh database..."
+            mysql -h "$DB_SERVER_HOST" -u root -p"$MYSQL_ROOT_PASSWORD" -e "CREATE DATABASE $MYSQL_DATABASE CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;"
+            mysql -h "$DB_SERVER_HOST" -u root -p"$MYSQL_ROOT_PASSWORD" -e "GRANT ALL PRIVILEGES ON $MYSQL_DATABASE.* TO '$MYSQL_USER'@'%';"
+            mysql -h "$DB_SERVER_HOST" -u root -p"$MYSQL_ROOT_PASSWORD" -e "FLUSH PRIVILEGES;"
+            
+            # Initialize Zabbix schema
+            echo "🏗️ Initializing Zabbix database schema..."
+            cd /usr/share/doc/zabbix-server-mysql*
+            
+            # Import schema
+            echo "📋 Importing database schema..."
+            mysql -h "$DB_SERVER_HOST" -u "$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE" < create.sql
+            
+            # Import initial data
+            echo "📊 Importing initial data..."
+            mysql -h "$DB_SERVER_HOST" -u "$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE" < data.sql
+            
+            # Import images (optional)
+            echo "🖼️ Importing images..."
+            mysql -h "$DB_SERVER_HOST" -u "$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE" < images.sql || echo "Images import failed, continuing..."
+            
+            echo "✅ Database initialization completed successfully"
+          else
+            echo "✅ Database is already initialized ($TABLE_COUNT tables found)"
+          fi
+          
+          echo "🎉 Database initialization job completed"

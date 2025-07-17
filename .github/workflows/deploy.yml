@@ -6,17 +6,54 @@ on:
   pull_request:
     branches: [ main ]
   workflow_dispatch:
+    inputs:
+      deployment_type:
+        description: 'Type of deployment'
+        required: true
+        default: 'full'
+        type: choice
+        options:
+        - full
+        - infrastructure-only
+        - application-only
+        - redeploy-clean
+      force_powershell:
+        description: 'Force PowerShell deployment (skip Azure CLI)'
+        required: false
+        default: false
+        type: boolean
+      reset_database:
+        description: 'Reset Zabbix database (WARNING: destroys data)'
+        required: false
+        default: false
+        type: boolean
+      environment_suffix:
+        description: 'Environment suffix (optional)'
+        required: false
+        default: ''
+        type: string
+      debug_mode:
+        description: 'Enable debug logging'
+        required: false
+        default: false
+        type: boolean
 
 env:
   AZURE_RESOURCE_GROUP: 'Devops-Test'
   AZURE_LOCATION: 'eastus'
   AZURE_SUBSCRIPTION_ID: 'd9b2a1cf-f99b-4f9e-a6cf-c79a078406bf'
+  DEPLOYMENT_TYPE: ${{ github.event.inputs.deployment_type || 'full' }}
+  FORCE_POWERSHELL: ${{ github.event.inputs.force_powershell || 'false' }}
+  RESET_DATABASE: ${{ github.event.inputs.reset_database || 'false' }}
+  DEBUG_MODE: ${{ github.event.inputs.debug_mode || 'false' }}
+  ENV_SUFFIX: ${{ github.event.inputs.environment_suffix || '' }}
 
 jobs:
   # Infrastructure Deployment
   deploy-infrastructure:
     runs-on: ubuntu-latest
     environment: production
+    if: ${{ github.event.inputs.deployment_type == 'full' || github.event.inputs.deployment_type == 'infrastructure-only' || github.event.inputs.deployment_type == 'redeploy-clean' || github.event.inputs.deployment_type == '' || github.event.inputs.deployment_type == null }}
     outputs:
       aks-cluster-name: ${{ steps.deploy-infra.outputs.AKS_CLUSTER_NAME }}
       resource-group: ${{ steps.deploy-infra.outputs.AZURE_RESOURCE_GROUP }}
@@ -25,6 +62,25 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+
+    - name: Display Deployment Configuration
+      run: |
+        echo "=== Deployment Configuration ==="
+        echo "Deployment Type: ${{ github.event.inputs.deployment_type || 'full' }}"
+        echo "Force PowerShell: ${{ github.event.inputs.force_powershell || 'false' }}"
+        echo "Reset Database: ${{ github.event.inputs.reset_database || 'false' }}"
+        echo "Debug Mode: ${{ github.event.inputs.debug_mode || 'false' }}"
+        echo "Environment Suffix: ${{ github.event.inputs.environment_suffix || 'none' }}"
+        echo "Resource Group: ${{ env.AZURE_RESOURCE_GROUP }}"
+        echo "Location: ${{ env.AZURE_LOCATION }}"
+        echo "Run Number: ${{ github.run_number }}"
+        echo "Actor: ${{ github.actor }}"
+        echo "Triggered by: ${{ github.event_name }}"
+        
+        if [ "${{ github.event.inputs.debug_mode }}" = "true" ]; then
+          echo "DEBUG_MODE=true" >> $GITHUB_ENV
+          echo "🐛 Debug mode enabled - detailed logging will be provided"
+        fi
 
     - name: Azure CLI Login
       uses: azure/login@v1
@@ -80,7 +136,12 @@ jobs:
         echo "🔧 Initializing AZD environment..."
         
         # Initialize AZD environment with proper name
-        ENV_NAME="zabbix-aks-${{ github.run_number }}"
+        ENV_SUFFIX="${{ github.event.inputs.environment_suffix }}"
+        if [ -n "$ENV_SUFFIX" ]; then
+          ENV_NAME="zabbix-aks-${{ github.run_number }}-$ENV_SUFFIX"
+        else
+          ENV_NAME="zabbix-aks-${{ github.run_number }}"
+        fi
         echo "Environment name: $ENV_NAME"
         
         # Initialize the environment non-interactively
@@ -470,7 +531,6 @@ jobs:
           # Import required modules
           Import-Module Az.Accounts -Force
           Import-Module Az.Resources -Force
-          Import-Module Az.Profile -Force
           
           # Parse credentials for PowerShell authentication
           $creds = '${{ secrets.AZURE_CREDENTIALS }}' | ConvertFrom-Json
@@ -683,6 +743,7 @@ jobs:
     needs: deploy-infrastructure
     runs-on: ubuntu-latest
     environment: production
+    if: ${{ always() && (github.event.inputs.deployment_type == 'full' || github.event.inputs.deployment_type == 'application-only' || github.event.inputs.deployment_type == 'redeploy-clean' || github.event.inputs.deployment_type == '' || github.event.inputs.deployment_type == null) && (needs.deploy-infrastructure.result == 'success' || github.event.inputs.deployment_type == 'application-only') }}
     
     steps:
     - name: Checkout code
@@ -720,25 +781,138 @@ jobs:
         kubectl apply -f k8s/zabbix-config.yaml
         kubectl get namespace zabbix
 
+    - name: Cleanup Existing Zabbix Resources (Conditional)
+      if: ${{ github.event.inputs.deployment_type == 'redeploy-clean' || github.event.inputs.reset_database == 'true' }}
+      run: |
+        echo "🧹 Cleaning up existing Zabbix resources for fresh deployment..."
+        echo "Deployment Type: ${{ github.event.inputs.deployment_type }}"
+        echo "Reset Database: ${{ github.event.inputs.reset_database }}"
+        
+        # Delete Zabbix deployments and services
+        kubectl delete deployment,service,ingress,configmap,secret -n zabbix --all --ignore-not-found=true
+        
+        # Wait for pods to terminate
+        kubectl wait --for=delete pods --all -n zabbix --timeout=120s || true
+        
+        # Clean up PVCs if database reset is requested
+        if [ "${{ github.event.inputs.reset_database }}" = "true" ]; then
+          echo "⚠️ RESETTING DATABASE - All data will be lost!"
+          kubectl delete pvc -n zabbix --all --ignore-not-found=true
+        fi
+        
+        echo "✅ Cleanup completed"
+
+    - name: Smart Cleanup for Regular Deployments
+      if: ${{ github.event.inputs.deployment_type != 'redeploy-clean' && github.event.inputs.reset_database != 'true' }}
+      run: |
+        echo "🔄 Performing smart cleanup (preserving data)..."
+        
+        # Only delete deployments and services, keep PVCs and secrets
+        kubectl delete deployment,service,ingress -n zabbix --ignore-not-found=true
+        
+        # Wait for pods to terminate
+        kubectl wait --for=delete pods -l app!=zabbix-mysql -n zabbix --timeout=60s || true
+        
+        echo "✅ Smart cleanup completed - data preserved"
+
     - name: Deploy MySQL Database
       run: |
         kubectl apply -f k8s/zabbix-mysql.yaml
         
         # Wait for MySQL to be ready
-        kubectl wait --for=condition=ready pod -l app=zabbix-mysql -n zabbix --timeout=300s
+        kubectl wait --for=condition=ready pod -l app=zabbix-mysql -n zabbix --timeout=600s
 
-    - name: Initialize Zabbix Database
+    - name: Initialize Zabbix Database with Complete Setup
       run: |
+        echo "🗄️ Initializing Zabbix database with complete schema and users..."
+        
         # Wait for MySQL pod to be running
         kubectl wait --for=condition=ready pod -l app=zabbix-mysql -n zabbix --timeout=300s
         
         # Get MySQL pod name
         MYSQL_POD=$(kubectl get pods -n zabbix -l app=zabbix-mysql -o jsonpath='{.items[0].metadata.name}')
+        echo "MySQL Pod: $MYSQL_POD"
         
-        # Download and import Zabbix schema
-        kubectl exec -n zabbix $MYSQL_POD -- mysql -u root -pZabbixRoot123! -e "CREATE DATABASE IF NOT EXISTS zabbix CHARACTER SET utf8 COLLATE utf8_bin;"
-        kubectl exec -n zabbix $MYSQL_POD -- mysql -u root -pZabbixRoot123! -e "GRANT ALL PRIVILEGES ON zabbix.* TO 'zabbix'@'%' IDENTIFIED BY 'zabbix123!';"
-        kubectl exec -n zabbix $MYSQL_POD -- mysql -u root -pZabbixRoot123! -e "FLUSH PRIVILEGES;"
+        # Check if database exists and has data
+        DB_EXISTS=$(kubectl exec -n zabbix $MYSQL_POD -- mysql -u root -pZabbixRoot123! -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='zabbix';" 2>/dev/null | tail -n 1 || echo "0")
+        
+        # Force database reset if requested
+        if [ "${{ github.event.inputs.reset_database }}" = "true" ]; then
+          echo "⚠️ Force database reset requested - dropping existing database"
+          DB_EXISTS="0"
+        fi
+        
+        if [ "$DB_EXISTS" -gt "10" ]; then
+          echo "✅ Zabbix database already exists with $DB_EXISTS tables"
+          if [ "${{ github.event.inputs.debug_mode }}" = "true" ]; then
+            echo "🐛 Existing tables:"
+            kubectl exec -n zabbix $MYSQL_POD -- mysql -u root -pZabbixRoot123! -e "SHOW TABLES FROM zabbix;" || true
+          fi
+          echo "Skipping database initialization"
+        else
+          echo "🔧 Setting up fresh Zabbix database..."
+          
+          # Create database and user
+          kubectl exec -n zabbix $MYSQL_POD -- mysql -u root -pZabbixRoot123! -e "DROP DATABASE IF EXISTS zabbix;"
+          kubectl exec -n zabbix $MYSQL_POD -- mysql -u root -pZabbixRoot123! -e "CREATE DATABASE zabbix CHARACTER SET utf8 COLLATE utf8_bin;"
+          kubectl exec -n zabbix $MYSQL_POD -- mysql -u root -pZabbixRoot123! -e "GRANT ALL PRIVILEGES ON zabbix.* TO 'zabbix'@'%' IDENTIFIED BY 'zabbix123!';"
+          kubectl exec -n zabbix $MYSQL_POD -- mysql -u root -pZabbixRoot123! -e "FLUSH PRIVILEGES;"
+          
+          # Apply the database initialization job for complete schema setup
+          kubectl apply -f k8s/zabbix-db-init-direct.yaml
+          
+          # Wait for initialization job to complete
+          kubectl wait --for=condition=complete job/zabbix-db-init -n zabbix --timeout=600s || {
+            echo "⚠️ Database initialization job didn't complete, checking logs..."
+            kubectl logs job/zabbix-db-init -n zabbix || true
+            echo "Continuing with manual setup..."
+          }
+          
+          # Verify database schema was created
+          TABLE_COUNT=$(kubectl exec -n zabbix $MYSQL_POD -- mysql -u root -pZabbixRoot123! -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='zabbix';" 2>/dev/null | tail -n 1 || echo "0")
+          echo "Database tables created: $TABLE_COUNT"
+          
+          if [ "$TABLE_COUNT" -lt "10" ]; then
+            echo "❌ Database initialization failed, manual intervention required"
+            exit 1
+          fi
+          
+          # Ensure admin user exists
+          ADMIN_EXISTS=$(kubectl exec -n zabbix $MYSQL_POD -- mysql -u zabbix -pzabbix123! zabbix -e "SELECT COUNT(*) FROM users WHERE username='Admin';" 2>/dev/null | tail -n 1 || echo "0")
+          
+          if [ "$ADMIN_EXISTS" -eq "0" ]; then
+            echo "🔧 Creating default Admin user..."
+            kubectl exec -n zabbix $MYSQL_POD -- mysql -u zabbix -pzabbix123! zabbix -e "
+              INSERT INTO users (userid, username, name, surname, passwd, url, autologin, autologout, lang, refresh, theme, attempt_failed, attempt_ip, attempt_clock, rows_per_page)
+              VALUES (1, 'Admin', 'Zabbix', 'Administrator', '5fce1b3e34b520afeffb37ce08c7cd66', '', 1, '15m', 'en_US', '30s', 'default', 0, '', 0, 50)
+              ON DUPLICATE KEY UPDATE passwd='5fce1b3e34b520afeffb37ce08c7cd66';
+            "
+            
+            # Ensure Super Admin role exists and is assigned
+            kubectl exec -n zabbix $MYSQL_POD -- mysql -u zabbix -pzabbix123! zabbix -e "
+              INSERT IGNORE INTO role (roleid, name, type, readonly) VALUES (3, 'Super admin role', 3, 1);
+              INSERT IGNORE INTO user_role (userid, roleid) VALUES (1, 3);
+            "
+            
+            echo "✅ Admin user created with default password 'zabbix'"
+          fi
+          
+          # Create guest user and role
+          kubectl exec -n zabbix $MYSQL_POD -- mysql -u zabbix -pzabbix123! zabbix -e "
+            INSERT IGNORE INTO users (userid, username, name, surname, passwd, url, autologin, autologout, lang, refresh, theme, attempt_failed, attempt_ip, attempt_clock, rows_per_page)
+            VALUES (2, 'guest', '', '', 'd41d8cd98f00b204e9800998ecf8427e', '', 0, '15m', 'en_US', '30s', 'default', 0, '', 0, 50);
+            
+            INSERT IGNORE INTO role (roleid, name, type, readonly) VALUES (1, 'Guest role', 1, 1);
+            INSERT IGNORE INTO user_role (userid, roleid) VALUES (2, 1);
+            
+            INSERT IGNORE INTO usrgrp (usrgrpid, name, gui_access, users_status, debug_mode)
+            VALUES (7, 'Guests', 0, 0, 0), (9, 'Enabled debug mode', 0, 0, 1);
+            
+            INSERT IGNORE INTO users_groups (id, usrgrpid, userid) VALUES (1, 7, 1), (2, 9, 1);
+          "
+          
+          echo "✅ Database initialization completed successfully"
+        fi
 
     - name: Deploy Zabbix Server Components
       run: |
@@ -812,9 +986,9 @@ jobs:
 
   # Security and Post-Deployment
   post-deployment:
-    needs: [deploy-infrastructure, deploy-zabbix]
+    needs: [deploy-infrastructure, deploy-zabbix, deploy-zabbix-only]
     runs-on: ubuntu-latest
-    if: success()
+    if: ${{ always() && (needs.deploy-zabbix.result == 'success' || needs.deploy-zabbix-only.result == 'success') && github.event.inputs.deployment_type != 'infrastructure-only' }}
     
     steps:
     - name: Azure CLI Login
@@ -861,6 +1035,129 @@ jobs:
       with:
         name: deployment-report
         path: deployment-report.md
+
+  # Application-Only Deployment (uses existing AKS cluster)
+  deploy-zabbix-only:
+    runs-on: ubuntu-latest
+    environment: production
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.deployment_type == 'application-only' }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Display Application-Only Deployment Configuration
+      run: |
+        echo "=== Application-Only Deployment ==="
+        echo "This deployment assumes AKS cluster already exists"
+        echo "Resource Group: ${{ env.AZURE_RESOURCE_GROUP }}"
+        echo "Reset Database: ${{ github.event.inputs.reset_database || 'false' }}"
+        echo "Debug Mode: ${{ github.event.inputs.debug_mode || 'false' }}"
+
+    - name: Azure CLI Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Find and Connect to Existing AKS Cluster
+      run: |
+        echo "🔍 Finding existing AKS cluster in resource group ${{ env.AZURE_RESOURCE_GROUP }}..."
+        
+        # List AKS clusters in the resource group
+        AKS_CLUSTERS=$(az aks list --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --query "[].name" -o tsv)
+        
+        if [ -z "$AKS_CLUSTERS" ]; then
+          echo "❌ No AKS clusters found in resource group ${{ env.AZURE_RESOURCE_GROUP }}"
+          exit 1
+        fi
+        
+        # Get the first (or only) cluster
+        AKS_CLUSTER_NAME=$(echo "$AKS_CLUSTERS" | head -n 1)
+        echo "✅ Found AKS cluster: $AKS_CLUSTER_NAME"
+        
+        # Get credentials
+        az aks get-credentials \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --name "$AKS_CLUSTER_NAME" \
+          --overwrite-existing
+        
+        # Verify connection
+        kubectl cluster-info
+        kubectl get nodes
+        
+        # Store cluster name for other steps
+        echo "AKS_CLUSTER_NAME=$AKS_CLUSTER_NAME" >> $GITHUB_ENV
+
+    - name: Deploy Zabbix (Application Only)
+      run: |
+        echo "🚀 Deploying Zabbix application to existing cluster..."
+        
+        # Install NGINX Ingress Controller if not present
+        if ! kubectl get namespace ingress-nginx >/dev/null 2>&1; then
+          echo "Installing NGINX Ingress Controller..."
+          helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+          helm repo update
+          helm install ingress-nginx ingress-nginx/ingress-nginx \
+            --namespace ingress-nginx \
+            --create-namespace \
+            --set controller.replicaCount=2 \
+            --set controller.service.type=LoadBalancer \
+            --wait
+        else
+          echo "✅ NGINX Ingress Controller already exists"
+        fi
+        
+        # Deploy Zabbix namespace and configuration
+        kubectl apply -f k8s/zabbix-config.yaml
+        
+        # Conditional cleanup based on user input
+        if [ "${{ github.event.inputs.reset_database }}" = "true" ]; then
+          echo "⚠️ Resetting all Zabbix resources and data..."
+          kubectl delete all,pvc,configmap,secret -n zabbix --all --ignore-not-found=true
+        else
+          echo "🔄 Performing smart cleanup (preserving data)..."
+          kubectl delete deployment,service,ingress -n zabbix --ignore-not-found=true
+        fi
+        
+        # Deploy MySQL
+        kubectl apply -f k8s/zabbix-mysql.yaml
+        kubectl wait --for=condition=ready pod -l app=zabbix-mysql -n zabbix --timeout=600s
+        
+        # Initialize database (with smart detection)
+        # ... (reuse the database initialization logic from the main job)
+        MYSQL_POD=$(kubectl get pods -n zabbix -l app=zabbix-mysql -o jsonpath='{.items[0].metadata.name}')
+        DB_EXISTS=$(kubectl exec -n zabbix $MYSQL_POD -- mysql -u root -pZabbixRoot123! -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='zabbix';" 2>/dev/null | tail -n 1 || echo "0")
+        
+        if [ "${{ github.event.inputs.reset_database }}" = "true" ]; then
+          DB_EXISTS="0"
+        fi
+        
+        if [ "$DB_EXISTS" -lt "10" ]; then
+          echo "🔧 Initializing Zabbix database..."
+          kubectl exec -n zabbix $MYSQL_POD -- mysql -u root -pZabbixRoot123! -e "DROP DATABASE IF EXISTS zabbix;"
+          kubectl exec -n zabbix $MYSQL_POD -- mysql -u root -pZabbixRoot123! -e "CREATE DATABASE zabbix CHARACTER SET utf8 COLLATE utf8_bin;"
+          kubectl exec -n zabbix $MYSQL_POD -- mysql -u root -pZabbixRoot123! -e "GRANT ALL PRIVILEGES ON zabbix.* TO 'zabbix'@'%' IDENTIFIED BY 'zabbix123!';"
+          kubectl apply -f k8s/zabbix-db-init-direct.yaml
+          kubectl wait --for=condition=complete job/zabbix-db-init -n zabbix --timeout=600s || true
+        fi
+        
+        # Deploy Zabbix components
+        kubectl apply -f k8s/zabbix-additional.yaml
+        kubectl wait --for=condition=available deployment/zabbix-java-gateway -n zabbix --timeout=300s
+        
+        kubectl apply -f k8s/zabbix-server.yaml
+        kubectl wait --for=condition=available deployment/zabbix-server -n zabbix --timeout=300s
+        
+        kubectl apply -f k8s/zabbix-web.yaml
+        kubectl wait --for=condition=available deployment/zabbix-web -n zabbix --timeout=300s
+        
+        kubectl apply -f k8s/zabbix-ingress.yaml
+        
+        echo "✅ Application-only deployment completed!"
+        
+        # Display status
+        kubectl get all -n zabbix
+        kubectl get ingress -n zabbix
 
   # PowerShell-Only Deployment (Alternative for Azure CLI issues)
   deploy-infrastructure-powershell:
@@ -928,3 +1225,53 @@ jobs:
           Write-Host "❌ PowerShell deployment failed: $($_.Exception.Message)" -ForegroundColor Red
           exit 1
         }
+
+  # Final Deployment Summary
+  deployment-summary:
+    needs: [deploy-infrastructure, deploy-zabbix, deploy-zabbix-only, deploy-infrastructure-powershell, post-deployment]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+    - name: Generate Final Deployment Summary
+      run: |
+        echo "=== Final Deployment Summary ===" >> $GITHUB_STEP_SUMMARY
+        echo "**Deployment Configuration:**" >> $GITHUB_STEP_SUMMARY
+        echo "- Type: ${{ github.event.inputs.deployment_type || 'full' }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Force PowerShell: ${{ github.event.inputs.force_powershell || 'false' }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Reset Database: ${{ github.event.inputs.reset_database || 'false' }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Debug Mode: ${{ github.event.inputs.debug_mode || 'false' }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Environment Suffix: ${{ github.event.inputs.environment_suffix || 'none' }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        echo "**Job Results:**" >> $GITHUB_STEP_SUMMARY
+        echo "- Infrastructure: ${{ needs.deploy-infrastructure.result || 'skipped' }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Zabbix Application: ${{ needs.deploy-zabbix.result || 'skipped' }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Application-Only: ${{ needs.deploy-zabbix-only.result || 'skipped' }}" >> $GITHUB_STEP_SUMMARY
+        echo "- PowerShell Deployment: ${{ needs.deploy-infrastructure-powershell.result || 'skipped' }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Post-Deployment: ${{ needs.post-deployment.result || 'skipped' }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        # Determine overall success
+        if [[ "${{ needs.deploy-zabbix.result }}" == "success" || "${{ needs.deploy-zabbix-only.result }}" == "success" ]]; then
+          echo "**✅ Overall Status: SUCCESS**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Next Steps:**" >> $GITHUB_STEP_SUMMARY
+          echo "1. Configure DNS for dal2-devmon-mgt.forescout.com" >> $GITHUB_STEP_SUMMARY
+          echo "2. Upload SSL certificate" >> $GITHUB_STEP_SUMMARY
+          echo "3. Change default Zabbix admin password (Admin/zabbix)" >> $GITHUB_STEP_SUMMARY
+          echo "4. Configure monitoring templates" >> $GITHUB_STEP_SUMMARY
+        elif [[ "${{ needs.deploy-infrastructure.result }}" == "success" && "${{ github.event.inputs.deployment_type }}" == "infrastructure-only" ]]; then
+          echo "**✅ Infrastructure Deployment: SUCCESS**" >> $GITHUB_STEP_SUMMARY
+          echo "Infrastructure is ready for application deployment." >> $GITHUB_STEP_SUMMARY
+        else
+          echo "**❌ Overall Status: FAILED**" >> $GITHUB_STEP_SUMMARY
+          echo "Check individual job logs for details." >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Redeployment Options:**" >> $GITHUB_STEP_SUMMARY
+        echo "- **Full Redeploy**: Use 'redeploy-clean' deployment type" >> $GITHUB_STEP_SUMMARY
+        echo "- **App Only**: Use 'application-only' to redeploy just Zabbix" >> $GITHUB_STEP_SUMMARY
+        echo "- **Infrastructure Only**: Use 'infrastructure-only' for infra changes" >> $GITHUB_STEP_SUMMARY
+        echo "- **Reset Database**: Enable 'reset_database' option (⚠️ destroys data)" >> $GITHUB_STEP_SUMMARY

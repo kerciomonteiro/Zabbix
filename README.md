@@ -291,6 +291,70 @@ The GitHub Actions workflow includes:
 - Pull requests to `main`
 - Manual workflow dispatch
 
+## 🔄 GitHub Actions Deployment Options
+
+This repository includes a comprehensive GitHub Actions workflow (`deploy.yml`) that supports multiple deployment scenarios:
+
+### Deployment Types
+
+1. **Full Deployment** (Default)
+   - Deploys both infrastructure and Zabbix application
+   - Use for initial deployment or complete refresh
+
+2. **Infrastructure Only**
+   - Deploys only the AKS cluster and Azure resources
+   - Use when you want to set up infrastructure first
+
+3. **Application Only**
+   - Deploys only Zabbix to existing AKS cluster
+   - Use for application updates or when infrastructure already exists
+
+4. **Clean Redeploy**
+   - Performs complete cleanup and fresh deployment
+   - Use when you need to start completely fresh
+
+### Workflow Options
+
+You can customize your deployment by using **GitHub Actions → Run workflow** with these options:
+
+- **Deployment Type**: Choose from full, infrastructure-only, application-only, or redeploy-clean
+- **Force PowerShell**: Use Azure PowerShell instead of Azure CLI (fallback option)
+- **Reset Database**: ⚠️ **WARNING**: Destroys all Zabbix data and creates fresh database
+- **Environment Suffix**: Add custom suffix to resource names (optional)
+- **Debug Mode**: Enable detailed logging for troubleshooting
+
+### How to Redeploy
+
+#### Quick Application Update
+1. Go to **Actions** tab in GitHub
+2. Select **Deploy AKS Zabbix Infrastructure** workflow
+3. Click **Run workflow**
+4. Select **Deployment type**: `application-only`
+5. Click **Run workflow**
+
+#### Complete Clean Redeploy
+1. Go to **Actions** tab in GitHub
+2. Select **Deploy AKS Zabbix Infrastructure** workflow
+3. Click **Run workflow**
+4. Select **Deployment type**: `redeploy-clean`
+5. ⚠️ Enable **Reset Database** if you want fresh data (destroys existing data)
+6. Click **Run workflow**
+
+#### Infrastructure Only Update
+1. Go to **Actions** tab in GitHub
+2. Select **Deploy AKS Zabbix Infrastructure** workflow
+3. Click **Run workflow**
+4. Select **Deployment type**: `infrastructure-only`
+5. Click **Run workflow**
+
+### Fallback Options
+
+The workflow includes multiple fallback mechanisms:
+- **Azure CLI** → **Emergency ARM Template** → **PowerShell** → **Regular ARM Template**
+- Built-in retry logic for network issues
+- Automatic session reset for "content consumed" errors
+- Smart cleanup that preserves data by default
+
 ## 🛠️ Troubleshooting and Testing
 
 ### Local Template Testing
