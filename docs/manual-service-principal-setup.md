@@ -256,3 +256,56 @@ This error occurs when Azure Developer CLI (AZD) cannot authenticate in the GitH
 **Manual Resolution** (if needed):
 1. Re-run the workflow (it will use Azure CLI fallback)
 2. The fallback method is actually more reliable for CI/CD environments
+
+### Error: "argument --name/-n: expected one argument" (Empty AKS Cluster Name)
+
+This error occurs when the AKS cluster name is not properly captured from the Bicep deployment outputs, resulting in an empty `--name` parameter in the `az aks get-credentials` command.
+
+**Example Error:**
+```
+az aks get-credentials \
+  --resource-group Devops-Test \
+  --name  \
+  --overwrite-existing
+
+ERROR: argument --name/-n: expected one argument
+```
+
+**Root Cause**: 
+- Missing or incorrect output names in the Bicep template
+- Mismatch between expected output names in the workflow and actual Bicep outputs
+- Deployment failure that doesn't produce the expected outputs
+
+**Solution**: The workflow has been updated to:
+
+1. **Correct Output Names**: Use `AKS_CLUSTER_NAME` (matches Bicep output) instead of `aksClusterName`
+2. **Add Missing Outputs**: Ensure Bicep template includes all required outputs:
+   ```bicep
+   output AKS_CLUSTER_NAME string = aksCluster.name
+   output AKS_CLUSTER_ID string = aksCluster.id
+   ```
+3. **Enhanced Error Handling**: Display full deployment outputs for debugging:
+   ```bash
+   echo "Raw deployment output:"
+   echo "$DEPLOYMENT_OUTPUT" | jq '.'
+   echo "Available outputs:"
+   echo "$DEPLOYMENT_OUTPUT" | jq '.properties.outputs // {}'
+   ```
+
+**Verification**: After the fix, you should see:
+```
+✅ Infrastructure deployed successfully!
+   AKS Cluster: aks-a1b2c3d4
+   Resource Group: Devops-Test
+   Container Registry: crzabbixa1b2c3d4.azurecr.io
+```
+
+**Manual Recovery** (if needed):
+1. Get the cluster name manually:
+   ```bash
+   az aks list --resource-group Devops-Test --query "[].name" -o tsv
+   ```
+2. Use the cluster name in subsequent commands:
+   ```bash
+   az aks get-credentials --resource-group Devops-Test --name <cluster-name> --overwrite-existing
+   ```
