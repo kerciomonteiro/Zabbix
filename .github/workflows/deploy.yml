@@ -272,8 +272,17 @@ jobs:
               echo "Error output:"
               echo "$DEPLOYMENT_OUTPUT"
               
-              # Check if it's a retryable error
-              if echo "$DEPLOYMENT_OUTPUT" | grep -i "content.*already.*consumed\|timeout\|network\|connection\|login"; then
+              # Check for specific "content consumed" error and set flag for immediate ARM fallback
+              if echo "$DEPLOYMENT_OUTPUT" | grep -i "content.*already.*consumed"; then
+                echo "🚨 Detected 'content already consumed' error - this is a known Azure CLI session issue"
+                echo "⚡ Setting flag for immediate ARM template fallback..."
+                echo "BICEP_FAILED_CONTENT_ERROR=true" >> $GITHUB_ENV
+                echo "❌ Bicep deployment failed due to Azure CLI session issue"
+                return 1
+              fi
+              
+              # Check if it's a retryable error (other than content consumed)
+              if echo "$DEPLOYMENT_OUTPUT" | grep -i "timeout\|network\|connection\|login"; then
                 if [ $attempt -lt $max_attempts ]; then
                   echo "⏳ Retryable error detected. Waiting ${delay}s before retry..."
                   sleep $delay
@@ -343,6 +352,87 @@ jobs:
         echo "   AKS Cluster: $AKS_CLUSTER_NAME"
         echo "   Resource Group: ${{ env.AZURE_RESOURCE_GROUP }}"
         echo "   Container Registry: $CONTAINER_REGISTRY_ENDPOINT"
+
+    - name: Emergency ARM Template Deployment (Content Consumed Error)
+      id: deploy-infra-arm-emergency
+      if: steps.deploy-infra-cli.conclusion == 'failure' && !cancelled()
+      run: |
+        # Check if the failure was due to content consumed error
+        if [ "${BICEP_FAILED_CONTENT_ERROR:-}" = "true" ]; then
+          echo "🚨 EMERGENCY: Deploying with ARM template due to 'content consumed' error"
+          echo "🔄 This bypasses the Azure CLI Bicep deployment which has session issues"
+        else
+          echo "⏭️ Skipping emergency ARM deployment - not a content consumed error"
+          echo "DEPLOYMENT_SUCCESS=false" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+        
+        # Generate deployment name with timestamp
+        TIMESTAMP=$(date +%s)
+        ARM_DEPLOYMENT_NAME="zabbix-arm-emergency-${{ github.run_number }}-$TIMESTAMP"
+        echo "Emergency ARM Deployment name: $ARM_DEPLOYMENT_NAME"
+        
+        # Clear Azure CLI cache completely and re-authenticate fresh
+        echo "🧹 Performing complete Azure CLI session reset..."
+        rm -rf ~/.azure/logs ~/.azure/commandIndex.json ~/.azure/telemetry.txt 2>/dev/null || true
+        rm -rf ~/.azure/httpCache ~/.azure/aadCache ~/.azure/msal_cache.json 2>/dev/null || true
+        az logout 2>/dev/null || true
+        az account clear 2>/dev/null || true
+        
+        echo "🔐 Establishing fresh Azure CLI session for ARM deployment..."
+        echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r .clientSecret | az login \
+          --service-principal \
+          --username "$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r .clientId)" \
+          --tenant "$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r .tenantId)" \
+          --password-stdin > /dev/null
+        
+        az account set --subscription "${{ env.AZURE_SUBSCRIPTION_ID }}"
+        echo "✅ Fresh session established"
+        
+        # Deploy ARM template immediately (no retries needed - this usually works)
+        echo "🏗️ Deploying ARM template (emergency fallback)..."
+        set +e  # Don't exit on error
+        ARM_DEPLOYMENT_OUTPUT=$(timeout 1800 az deployment group create \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --template-file infra/main-arm.json \
+          --parameters environmentName="zabbix-aks-${{ github.run_number }}" \
+                       location="${{ env.AZURE_LOCATION }}" \
+          --name "$ARM_DEPLOYMENT_NAME" \
+          --mode Incremental \
+          --output json \
+          --only-show-errors 2>&1)
+        ARM_DEPLOYMENT_EXIT_CODE=$?
+        set -e  # Re-enable exit on error
+        
+        if [ $ARM_DEPLOYMENT_EXIT_CODE -ne 0 ]; then
+          echo "❌ Emergency ARM template deployment failed with exit code $ARM_DEPLOYMENT_EXIT_CODE"
+          echo "Error output:"
+          echo "$ARM_DEPLOYMENT_OUTPUT"
+          echo "DEPLOYMENT_SUCCESS=false" >> $GITHUB_OUTPUT
+        else
+          echo "✅ Emergency ARM template deployment successful!"
+          
+          # Extract outputs
+          AKS_CLUSTER_NAME=$(echo "$ARM_DEPLOYMENT_OUTPUT" | jq -r '.properties.outputs.AKS_CLUSTER_NAME.value // empty')
+          CONTAINER_REGISTRY_ENDPOINT=$(echo "$ARM_DEPLOYMENT_OUTPUT" | jq -r '.properties.outputs.CONTAINER_REGISTRY_ENDPOINT.value // empty')
+          
+          if [ -z "$AKS_CLUSTER_NAME" ] || [ "$AKS_CLUSTER_NAME" = "null" ]; then
+            echo "❌ Failed to get AKS cluster name from emergency ARM deployment outputs"
+            echo "DEPLOYMENT_SUCCESS=false" >> $GITHUB_OUTPUT
+          else
+            # Set outputs
+            echo "AKS_CLUSTER_NAME=$AKS_CLUSTER_NAME" >> $GITHUB_OUTPUT
+            echo "AZURE_RESOURCE_GROUP=${{ env.AZURE_RESOURCE_GROUP }}" >> $GITHUB_OUTPUT
+            echo "CONTAINER_REGISTRY_ENDPOINT=$CONTAINER_REGISTRY_ENDPOINT" >> $GITHUB_OUTPUT
+            echo "DEPLOYMENT_METHOD=arm-emergency" >> $GITHUB_OUTPUT
+            echo "DEPLOYMENT_SUCCESS=true" >> $GITHUB_OUTPUT
+            
+            echo "✅ Emergency ARM Infrastructure deployed successfully!"
+            echo "   AKS Cluster: $AKS_CLUSTER_NAME"
+            echo "   Resource Group: ${{ env.AZURE_RESOURCE_GROUP }}"
+            echo "   Container Registry: $CONTAINER_REGISTRY_ENDPOINT"
+          fi
+        fi
 
     - name: Provision Infrastructure with PowerShell (Final Fallback)
       id: deploy-infra-pwsh
@@ -482,6 +572,13 @@ jobs:
           echo "CONTAINER_REGISTRY_ENDPOINT=${{ steps.deploy-infra-cli.outputs.CONTAINER_REGISTRY_ENDPOINT }}" >> $GITHUB_OUTPUT
           echo "DEPLOYMENT_SUCCESS=true" >> $GITHUB_OUTPUT
           echo "✅ Used Azure CLI for deployment (AZD fallback)" >> $GITHUB_STEP_SUMMARY
+        elif [ "${{ steps.deploy-infra-arm-emergency.outputs.DEPLOYMENT_SUCCESS }}" = "true" ]; then
+          echo "Using Emergency ARM template deployment outputs"
+          echo "AKS_CLUSTER_NAME=${{ steps.deploy-infra-arm-emergency.outputs.AKS_CLUSTER_NAME }}" >> $GITHUB_OUTPUT
+          echo "AZURE_RESOURCE_GROUP=${{ steps.deploy-infra-arm-emergency.outputs.AZURE_RESOURCE_GROUP }}" >> $GITHUB_OUTPUT
+          echo "CONTAINER_REGISTRY_ENDPOINT=${{ steps.deploy-infra-arm-emergency.outputs.CONTAINER_REGISTRY_ENDPOINT }}" >> $GITHUB_OUTPUT
+          echo "DEPLOYMENT_SUCCESS=true" >> $GITHUB_OUTPUT
+          echo "✅ Used Emergency ARM template for deployment (content consumed error fallback)" >> $GITHUB_STEP_SUMMARY
         elif [ "${{ steps.deploy-infra-pwsh.outputs.DEPLOYMENT_SUCCESS }}" = "true" ]; then
           echo "Using Azure PowerShell deployment outputs"
           echo "AKS_CLUSTER_NAME=${{ steps.deploy-infra-pwsh.outputs.AKS_CLUSTER_NAME }}" >> $GITHUB_OUTPUT
@@ -500,6 +597,7 @@ jobs:
           echo "❌ All deployment methods failed or returned empty outputs" >> $GITHUB_STEP_SUMMARY
           echo "AZD success: ${{ steps.deploy-infra-azd.outputs.DEPLOYMENT_SUCCESS }}"
           echo "CLI success: ${{ steps.deploy-infra-cli.outputs.DEPLOYMENT_SUCCESS }}"
+          echo "Emergency ARM success: ${{ steps.deploy-infra-arm-emergency.outputs.DEPLOYMENT_SUCCESS }}"
           echo "PowerShell success: ${{ steps.deploy-infra-pwsh.outputs.DEPLOYMENT_SUCCESS }}"
           echo "ARM success: ${{ steps.deploy-infra-arm.outputs.DEPLOYMENT_SUCCESS }}"
           echo "DEPLOYMENT_SUCCESS=false" >> $GITHUB_OUTPUT
@@ -520,6 +618,11 @@ jobs:
           echo "AKS Cluster Name: ${{ steps.deploy-infra-cli.outputs.AKS_CLUSTER_NAME }}"
           echo "Resource Group: ${{ steps.deploy-infra-cli.outputs.AZURE_RESOURCE_GROUP }}"
           echo "Container Registry: ${{ steps.deploy-infra-cli.outputs.CONTAINER_REGISTRY_ENDPOINT }}"
+        elif [ "${{ steps.deploy-infra-arm-emergency.outputs.DEPLOYMENT_SUCCESS }}" = "true" ]; then
+          echo "✅ Deployment Method: Emergency ARM Template (Content Consumed Error Fallback)"
+          echo "AKS Cluster Name: ${{ steps.deploy-infra-arm-emergency.outputs.AKS_CLUSTER_NAME }}"
+          echo "Resource Group: ${{ steps.deploy-infra-arm-emergency.outputs.AZURE_RESOURCE_GROUP }}"
+          echo "Container Registry: ${{ steps.deploy-infra-arm-emergency.outputs.CONTAINER_REGISTRY_ENDPOINT }}"
         elif [ "${{ steps.deploy-infra-pwsh.outputs.DEPLOYMENT_SUCCESS }}" = "true" ]; then
           echo "✅ Deployment Method: Azure PowerShell (Final Fallback)"
           echo "AKS Cluster Name: ${{ steps.deploy-infra-pwsh.outputs.AKS_CLUSTER_NAME }}"
