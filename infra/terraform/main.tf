@@ -47,6 +47,11 @@ import {
   id = "/subscriptions/d9b2a1cf-f99b-4f9e-a6cf-c79a078406bf/resourceGroups/Devops-Test/providers/Microsoft.ContainerService/managedClusters/aks-devops-eastus"
 }
 
+import {
+  to = azurerm_application_gateway.main
+  id = "/subscriptions/d9b2a1cf-f99b-4f9e-a6cf-c79a078406bf/resourceGroups/Devops-Test/providers/Microsoft.Network/applicationGateways/appgw-devops-eastus"
+}
+
 # Data sources for existing resources
 data "azurerm_resource_group" "main" {
   name = var.resource_group_name
