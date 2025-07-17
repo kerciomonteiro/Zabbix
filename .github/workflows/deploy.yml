@@ -91,7 +91,8 @@ jobs:
         
         # Set additional environment variables
         azd env set AZURE_RESOURCE_GROUP "${{ env.AZURE_RESOURCE_GROUP }}"
-        azd env set AZURE_PRINCIPAL_ID "$(az ad signed-in-user show --query id -o tsv)"
+        # Skip AZURE_PRINCIPAL_ID for service principal authentication
+        # azd env set AZURE_PRINCIPAL_ID "$(az ad signed-in-user show --query id -o tsv)"
         azd env set AZURE_RESOURCE_TOKEN "$(echo $RANDOM | md5sum | head -c 8)"
         
         # Authenticate AZD using the service principal (inherit from Azure CLI)
@@ -141,12 +142,16 @@ jobs:
         
         # Deploy Bicep template with error handling
         echo "🏗️ Deploying Bicep template..."
+        
+        # For service principal authentication, we don't need to pass principalId
+        # The Bicep template will skip user role assignments when principalId is empty
+        echo "ℹ️ Deploying with service principal authentication (no user principal ID needed)"
+        
         DEPLOYMENT_OUTPUT=$(az deployment group create \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
           --template-file infra/main.bicep \
           --parameters environmentName="zabbix-aks-${{ github.run_number }}" \
                        location="${{ env.AZURE_LOCATION }}" \
-                       principalId="$(az ad signed-in-user show --query id -o tsv)" \
           --name "$DEPLOYMENT_NAME" \
           --output json)
         
