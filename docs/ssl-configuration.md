@@ -11,7 +11,7 @@ This document explains how to configure SSL certificates for the Zabbix server r
 az keyvault create \
   --name "kv-zabbix-certs-${RANDOM}" \
   --resource-group "Devops-Test" \
-  --location "eastus2"
+  --location "eastus"
 
 # Upload your PFX certificate
 az keyvault certificate import \

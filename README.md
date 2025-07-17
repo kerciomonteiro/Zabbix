@@ -108,7 +108,7 @@ azd auth login
 
 # Set environment variables
 azd env set AZURE_ENV_NAME "zabbix-production"
-azd env set AZURE_LOCATION "eastus2"
+azd env set AZURE_LOCATION "eastus"
 azd env set AZURE_SUBSCRIPTION_ID "d9b2a1cf-f99b-4f9e-a6cf-c79a078406bf"
 azd env set AZURE_RESOURCE_GROUP "Devops-Test"
 

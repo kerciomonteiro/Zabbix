@@ -215,3 +215,17 @@ If you continue to see this error, the workflow will automatically use Azure CLI
 **Manual workaround** (if needed):
 - Re-run the workflow (the network issue is often temporary)
 - The fallback Azure CLI method should work even if AZD installation fails
+
+### Error: AZD Environment Name Validation
+
+If you see errors about invalid environment names or AZD hanging on environment setup, this indicates an issue with AZD environment initialization.
+
+**Solution**: The workflow now properly initializes AZD environments non-interactively:
+
+1. Creates a unique environment name using the GitHub run number
+2. Initializes the environment with proper location and subscription
+3. Automatically falls back to Azure CLI if AZD initialization fails
+
+**Region Setting**: All deployments are configured for **East US (eastus)** region.
+
+If AZD continues to fail, the workflow will automatically use the Azure CLI fallback method.

@@ -164,7 +164,7 @@ azd init
 
 # Set environment variables
 azd env set AZURE_ENV_NAME "zabbix-prod"
-azd env set AZURE_LOCATION "eastus2" 
+azd env set AZURE_LOCATION "eastus" 
 azd env set AZURE_SUBSCRIPTION_ID "d9b2a1cf-f99b-4f9e-a6cf-c79a078406bf"
 azd env set AZURE_RESOURCE_GROUP "Devops-Test"
 azd env set AZURE_PRINCIPAL_ID "$(az ad signed-in-user show --query id -o tsv)"
@@ -259,7 +259,7 @@ kubectl get services -n zabbix zabbix-web-external
    az keyvault create \
      --name "kv-zabbix-$(openssl rand -hex 4)" \
      --resource-group Devops-Test \
-     --location eastus2
+     --location eastus
 
    # Upload PFX certificate
    az keyvault certificate import \
