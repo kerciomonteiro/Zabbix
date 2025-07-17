@@ -309,3 +309,48 @@ ERROR: argument --name/-n: expected one argument
    ```bash
    az aks get-credentials --resource-group Devops-Test --name <cluster-name> --overwrite-existing
    ```
+
+### Error: "/me request is only valid with delegated authentication flow"
+
+This error occurs when the workflow tries to get the current user's information using Azure CLI commands that don't work with service principal authentication.
+
+**Example Error:**
+```
+ERROR: /me request is only valid with delegated authentication flow.
+ERROR: The content for this response was already consumed
+```
+
+**Root Cause**: 
+- Using `az ad signed-in-user show` when authenticated with a service principal
+- Service principal authentication doesn't have a "signed-in user" context
+- GitHub Actions uses service principal authentication, not interactive user authentication
+
+**Commands that cause this error:**
+- `az ad signed-in-user show --query id -o tsv`
+- Any command that tries to get current user information
+
+**Solution**: The workflow has been updated to:
+
+1. **Remove User Principal ID**: Skip the `principalId` parameter in Bicep deployments when using service principal auth
+2. **Skip AZD User Setup**: Don't set `AZURE_PRINCIPAL_ID` in AZD environment
+3. **Conditional Role Assignments**: Bicep template uses `if (!empty(principalId))` to skip user role assignments
+
+**Updated Deployment Command:**
+```bash
+# Before (causes error):
+az deployment group create \
+  --parameters principalId="$(az ad signed-in-user show --query id -o tsv)"
+
+# After (works with service principal):
+az deployment group create \
+  --parameters environmentName="..." location="..."
+  # No principalId parameter needed
+```
+
+**Verification**: After the fix, deployment should proceed without authentication errors:
+```
+✅ Deploying with service principal authentication (no user principal ID needed)
+✅ Infrastructure deployed successfully!
+```
+
+**Note**: This doesn't affect functionality since the Bicep template gracefully handles missing `principalId` by skipping user-specific role assignments that aren't needed for automated deployments.

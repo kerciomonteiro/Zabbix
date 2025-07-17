@@ -147,16 +147,31 @@ jobs:
         # The Bicep template will skip user role assignments when principalId is empty
         echo "ℹ️ Deploying with service principal authentication (no user principal ID needed)"
         
+        # Add more verbose output and error handling
+        set +e  # Don't exit on error so we can capture the output
         DEPLOYMENT_OUTPUT=$(az deployment group create \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
           --template-file infra/main.bicep \
           --parameters environmentName="zabbix-aks-${{ github.run_number }}" \
                        location="${{ env.AZURE_LOCATION }}" \
           --name "$DEPLOYMENT_NAME" \
-          --output json)
+          --output json \
+          --verbose 2>&1)
+        DEPLOYMENT_EXIT_CODE=$?
+        set -e  # Re-enable exit on error
         
-        if [ $? -ne 0 ]; then
-          echo "❌ Bicep deployment failed"
+        if [ $DEPLOYMENT_EXIT_CODE -ne 0 ]; then
+          echo "❌ Bicep deployment failed with exit code $DEPLOYMENT_EXIT_CODE"
+          echo "Error output:"
+          echo "$DEPLOYMENT_OUTPUT"
+          echo ""
+          echo "Attempting deployment validation..."
+          az deployment group validate \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --template-file infra/main.bicep \
+            --parameters environmentName="zabbix-aks-${{ github.run_number }}" \
+                         location="${{ env.AZURE_LOCATION }}" \
+            --verbose || echo "Validation also failed"
           exit 1
         fi
         

@@ -519,10 +519,10 @@ resource aksIdentityAcrPullAssignment 'Microsoft.Authorization/roleAssignments@2
   }
 }
 
-// User role assignment for management
+// User role assignment for management (only if principalId is provided)
 resource userContributorAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(principalId)) {
   scope: resourceGroup()
-  name: guid(resourceGroup().id, principalId, contributorRole.id)
+  name: guid(resourceGroup().id, 'user-contributor', !empty(principalId) ? principalId : 'no-user')
   properties: {
     roleDefinitionId: contributorRole.id
     principalId: principalId
