@@ -44,7 +44,7 @@ import {
 
 import {
   to = azurerm_kubernetes_cluster.main
-  id = "/subscriptions/d9b2a1cf-f99b-4f9e-a6cf-c79a078406bf/resourcegroups/Devops-Test/providers/Microsoft.ContainerService/managedClusters/aks-devops-eastus"
+  id = "/subscriptions/d9b2a1cf-f99b-4f9e-a6cf-c79a078406bf/resourceGroups/Devops-Test/providers/Microsoft.ContainerService/managedClusters/aks-devops-eastus"
 }
 
 # Data sources for existing resources
