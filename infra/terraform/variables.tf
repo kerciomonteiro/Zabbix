@@ -42,6 +42,12 @@ variable "principal_id" {
   default     = ""
 }
 
+variable "create_role_assignments" {
+  description = "Whether to create role assignments (requires elevated permissions)"
+  type        = bool
+  default     = false
+}
+
 variable "kubernetes_version" {
   description = "Version of Kubernetes to use for the AKS cluster"
   type        = string

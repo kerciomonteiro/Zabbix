@@ -10,6 +10,11 @@ environment_name   = "zabbix-devops-eastus-001"
 # Get this value using: az ad signed-in-user show --query id -o tsv
 # principal_id = "your-user-principal-id"
 
+# Role Assignment Configuration
+# Set to true only if the deployment principal has elevated permissions
+# If false, role assignments must be created manually after deployment
+create_role_assignments = false
+
 # AKS Configuration
 kubernetes_version = "1.29.9"
 

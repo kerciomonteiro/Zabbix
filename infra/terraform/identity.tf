@@ -19,8 +19,9 @@ data "azurerm_role_definition" "network_contributor" {
   name = "Network Contributor"
 }
 
-# AKS Managed Identity role assignments
+# AKS Managed Identity role assignments (conditional)
 resource "azurerm_role_assignment" "aks_identity_contributor" {
+  count                = var.create_role_assignments ? 1 : 0
   scope                = data.azurerm_resource_group.main.id
   role_definition_id   = data.azurerm_role_definition.contributor.id
   principal_id         = azurerm_user_assigned_identity.aks.principal_id
@@ -28,6 +29,7 @@ resource "azurerm_role_assignment" "aks_identity_contributor" {
 }
 
 resource "azurerm_role_assignment" "aks_identity_network_contributor" {
+  count                = var.create_role_assignments ? 1 : 0
   scope                = azurerm_virtual_network.main.id
   role_definition_id   = data.azurerm_role_definition.network_contributor.id
   principal_id         = azurerm_user_assigned_identity.aks.principal_id
@@ -35,6 +37,7 @@ resource "azurerm_role_assignment" "aks_identity_network_contributor" {
 }
 
 resource "azurerm_role_assignment" "aks_identity_acr_pull" {
+  count                = var.create_role_assignments ? 1 : 0
   scope                = azurerm_container_registry.main.id
   role_definition_id   = data.azurerm_role_definition.acr_pull.id
   principal_id         = azurerm_user_assigned_identity.aks.principal_id
