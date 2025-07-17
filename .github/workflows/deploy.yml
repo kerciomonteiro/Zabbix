@@ -124,16 +124,15 @@ jobs:
           echo "AZURE_RESOURCE_GROUP=$(azd env get-value AZURE_RESOURCE_GROUP)" >> $GITHUB_OUTPUT
           echo "CONTAINER_REGISTRY_ENDPOINT=$(azd env get-value CONTAINER_REGISTRY_ENDPOINT)" >> $GITHUB_OUTPUT
           echo "DEPLOYMENT_METHOD=azd" >> $GITHUB_OUTPUT
-          echo "AZD_SUCCESS=true" >> $GITHUB_ENV
+          echo "DEPLOYMENT_SUCCESS=true" >> $GITHUB_OUTPUT
         else
           echo "❌ AZD deployment failed, will fall back to Azure CLI"
-          echo "AZD_SUCCESS=false" >> $GITHUB_ENV
-          exit 1
+          echo "DEPLOYMENT_SUCCESS=false" >> $GITHUB_OUTPUT
         fi
 
     - name: Provision Infrastructure with Azure CLI (Fallback)
       id: deploy-infra-cli
-      if: env.AZD_AVAILABLE != 'true' || env.AZD_SUCCESS == 'false'
+      if: steps.deploy-infra-azd.outputs.DEPLOYMENT_SUCCESS != 'true'
       run: |
         echo "🚀 Deploying infrastructure using Azure CLI (AZD fallback)..."
         
@@ -176,6 +175,7 @@ jobs:
         echo "AZURE_RESOURCE_GROUP=${{ env.AZURE_RESOURCE_GROUP }}" >> $GITHUB_OUTPUT
         echo "CONTAINER_REGISTRY_ENDPOINT=$CONTAINER_REGISTRY_ENDPOINT" >> $GITHUB_OUTPUT
         echo "DEPLOYMENT_METHOD=cli" >> $GITHUB_OUTPUT
+        echo "DEPLOYMENT_SUCCESS=true" >> $GITHUB_OUTPUT
         
         echo "✅ Infrastructure deployed successfully!"
         echo "   AKS Cluster: $AKS_CLUSTER_NAME"
@@ -185,30 +185,46 @@ jobs:
     - name: Set Infrastructure Outputs
       id: deploy-infra
       run: |
-        # Combine outputs from either deployment method
-        if [ "${{ steps.deploy-infra-azd.outputs.AKS_CLUSTER_NAME }}" != "" ]; then
+        # Use outputs from whichever deployment method succeeded
+        if [ "${{ steps.deploy-infra-azd.outputs.DEPLOYMENT_SUCCESS }}" = "true" ]; then
+          echo "Using AZD deployment outputs"
           echo "AKS_CLUSTER_NAME=${{ steps.deploy-infra-azd.outputs.AKS_CLUSTER_NAME }}" >> $GITHUB_OUTPUT
           echo "AZURE_RESOURCE_GROUP=${{ steps.deploy-infra-azd.outputs.AZURE_RESOURCE_GROUP }}" >> $GITHUB_OUTPUT
           echo "CONTAINER_REGISTRY_ENDPOINT=${{ steps.deploy-infra-azd.outputs.CONTAINER_REGISTRY_ENDPOINT }}" >> $GITHUB_OUTPUT
           echo "DEPLOYMENT_SUCCESS=true" >> $GITHUB_OUTPUT
-          echo "Used AZD for deployment" >> $GITHUB_STEP_SUMMARY
-        elif [ "${{ steps.deploy-infra-cli.outputs.AKS_CLUSTER_NAME }}" != "" ] && [ "${{ steps.deploy-infra-cli.outputs.AKS_CLUSTER_NAME }}" != "null" ]; then
+          echo "✅ Used AZD for deployment" >> $GITHUB_STEP_SUMMARY
+        elif [ "${{ steps.deploy-infra-cli.outputs.DEPLOYMENT_SUCCESS }}" = "true" ]; then
+          echo "Using Azure CLI deployment outputs"
           echo "AKS_CLUSTER_NAME=${{ steps.deploy-infra-cli.outputs.AKS_CLUSTER_NAME }}" >> $GITHUB_OUTPUT
           echo "AZURE_RESOURCE_GROUP=${{ steps.deploy-infra-cli.outputs.AZURE_RESOURCE_GROUP }}" >> $GITHUB_OUTPUT
           echo "CONTAINER_REGISTRY_ENDPOINT=${{ steps.deploy-infra-cli.outputs.CONTAINER_REGISTRY_ENDPOINT }}" >> $GITHUB_OUTPUT
           echo "DEPLOYMENT_SUCCESS=true" >> $GITHUB_OUTPUT
-          echo "Used Azure CLI for deployment (AZD fallback)" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Used Azure CLI for deployment (AZD fallback)" >> $GITHUB_STEP_SUMMARY
         else
-          echo "❌ Both AZD and Azure CLI deployments failed or returned empty cluster name" >> $GITHUB_STEP_SUMMARY
+          echo "❌ Both AZD and Azure CLI deployments failed or returned empty outputs" >> $GITHUB_STEP_SUMMARY
+          echo "AZD success: ${{ steps.deploy-infra-azd.outputs.DEPLOYMENT_SUCCESS }}"
+          echo "CLI success: ${{ steps.deploy-infra-cli.outputs.DEPLOYMENT_SUCCESS }}"
           echo "DEPLOYMENT_SUCCESS=false" >> $GITHUB_OUTPUT
           exit 1
         fi
-        
-        # Display final results
-        echo "Final deployment outputs:"
-        echo "  AKS Cluster: $([ '${{ steps.deploy-infra-azd.outputs.AKS_CLUSTER_NAME }}' != '' ] && echo '${{ steps.deploy-infra-azd.outputs.AKS_CLUSTER_NAME }}' || echo '${{ steps.deploy-infra-cli.outputs.AKS_CLUSTER_NAME }}')"
-        echo "  Resource Group: $([ '${{ steps.deploy-infra-azd.outputs.AZURE_RESOURCE_GROUP }}' != '' ] && echo '${{ steps.deploy-infra-azd.outputs.AZURE_RESOURCE_GROUP }}' || echo '${{ steps.deploy-infra-cli.outputs.AZURE_RESOURCE_GROUP }}')"
-        echo "  Container Registry: $([ '${{ steps.deploy-infra-azd.outputs.CONTAINER_REGISTRY_ENDPOINT }}' != '' ] && echo '${{ steps.deploy-infra-azd.outputs.CONTAINER_REGISTRY_ENDPOINT }}' || echo '${{ steps.deploy-infra-cli.outputs.CONTAINER_REGISTRY_ENDPOINT }}')"
+
+    - name: Display Deployment Summary
+      run: |
+        echo ""
+        echo "=== Final Deployment Results ==="
+        if [ "${{ steps.deploy-infra-azd.outputs.DEPLOYMENT_SUCCESS }}" = "true" ]; then
+          echo "✅ Deployment Method: Azure Developer CLI (AZD)"
+          echo "AKS Cluster Name: ${{ steps.deploy-infra-azd.outputs.AKS_CLUSTER_NAME }}"
+          echo "Resource Group: ${{ steps.deploy-infra-azd.outputs.AZURE_RESOURCE_GROUP }}"
+          echo "Container Registry: ${{ steps.deploy-infra-azd.outputs.CONTAINER_REGISTRY_ENDPOINT }}"
+        elif [ "${{ steps.deploy-infra-cli.outputs.DEPLOYMENT_SUCCESS }}" = "true" ]; then
+          echo "✅ Deployment Method: Azure CLI (Fallback)"
+          echo "AKS Cluster Name: ${{ steps.deploy-infra-cli.outputs.AKS_CLUSTER_NAME }}"
+          echo "Resource Group: ${{ steps.deploy-infra-cli.outputs.AZURE_RESOURCE_GROUP }}"
+          echo "Container Registry: ${{ steps.deploy-infra-cli.outputs.CONTAINER_REGISTRY_ENDPOINT }}"
+        else
+          echo "❌ No successful deployment to display"
+        fi
 
     - name: Get AKS credentials
       if: steps.deploy-infra.outputs.DEPLOYMENT_SUCCESS == 'true'
