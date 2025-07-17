@@ -1,11 +1,12 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Alternative infrastructure deployment script using Azure PowerShell
+    Robust infrastructure deployment script using Azure PowerShell
     
 .DESCRIPTION
-    This script provides a backup deployment method using Azure PowerShell
-    when Azure CLI experiences issues like "content already consumed" errors.
+    This script provides a reliable deployment method using Azure PowerShell
+    to avoid Azure CLI issues like "content already consumed" errors.
+    Uses only PowerShell Azure modules for complete isolation from CLI.
     
 .PARAMETER ResourceGroupName
     The name of the Azure resource group
@@ -62,19 +63,25 @@ function Write-ColorOutput {
 try {
     Write-ColorOutput "🚀 Starting Azure PowerShell infrastructure deployment..." "Cyan"
     
-    # Check if Az module is installed
-    if (-not (Get-Module -ListAvailable -Name Az.Resources)) {
-        Write-ColorOutput "📦 Installing Azure PowerShell module..." "Yellow"
-        Install-Module -Name Az -Force -AllowClobber -Scope CurrentUser
+    # Check if already authenticated to Azure
+    $currentContext = Get-AzContext -ErrorAction SilentlyContinue
+    if ($currentContext -and $currentContext.Subscription.Id -eq $SubscriptionId) {
+        Write-ColorOutput "✅ Already authenticated to correct subscription: $($currentContext.Subscription.Name)" "Green"
+    } else {
+        Write-ColorOutput "� Not authenticated to correct subscription, authentication will be handled by calling workflow" "Blue"
     }
     
-    # Import required modules
-    Write-ColorOutput "📋 Importing Azure modules..." "Blue"
-    Import-Module Az.Accounts -Force
-    Import-Module Az.Resources -Force
-    Import-Module Az.Profile -Force
+    # Check if Az modules are available
+    $requiredModules = @('Az.Accounts', 'Az.Resources', 'Az.Profile')
+    foreach ($module in $requiredModules) {
+        if (-not (Get-Module -ListAvailable -Name $module)) {
+            Write-ColorOutput "� Installing Azure PowerShell module: $module..." "Yellow"
+            Install-Module -Name $module -Force -AllowClobber -Scope CurrentUser
+        }
+        Import-Module $module -Force
+    }
     
-    # Set subscription context
+    # Set subscription context (assumes authentication is already done by workflow)
     Write-ColorOutput "🔐 Setting subscription context..." "Blue"
     $context = Set-AzContext -SubscriptionId $SubscriptionId
     Write-ColorOutput "✅ Connected to subscription: $($context.Subscription.Name)" "Green"

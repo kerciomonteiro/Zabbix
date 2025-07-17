@@ -351,13 +351,48 @@ jobs:
       run: |
         Write-Host "🚀 Attempting deployment with Azure PowerShell (final fallback)..." -ForegroundColor Cyan
         
-        # Make script executable and run it
-        $scriptPath = Join-Path $env:GITHUB_WORKSPACE "scripts" "deploy-infrastructure-pwsh.ps1"
-        
-        if (Test-Path $scriptPath) {
-          & $scriptPath -ResourceGroupName "${{ env.AZURE_RESOURCE_GROUP }}" -Location "${{ env.AZURE_LOCATION }}" -EnvironmentName "zabbix-aks-${{ github.run_number }}" -SubscriptionId "${{ env.AZURE_SUBSCRIPTION_ID }}"
-        } else {
-          Write-Host "❌ PowerShell deployment script not found at: $scriptPath" -ForegroundColor Red
+        try {
+          # Install Azure PowerShell modules if not present
+          Write-Host "📦 Installing Azure PowerShell modules..." -ForegroundColor Yellow
+          if (-not (Get-Module -ListAvailable -Name Az.Accounts)) {
+            Install-Module -Name Az -Force -AllowClobber -Scope CurrentUser -Repository PSGallery
+          }
+          
+          # Import required modules
+          Import-Module Az.Accounts -Force
+          Import-Module Az.Resources -Force
+          Import-Module Az.Profile -Force
+          
+          # Parse credentials for PowerShell authentication
+          $creds = '${{ secrets.AZURE_CREDENTIALS }}' | ConvertFrom-Json
+          $securePassword = ConvertTo-SecureString $creds.clientSecret -AsPlainText -Force
+          $credential = New-Object System.Management.Automation.PSCredential($creds.clientId, $securePassword)
+          
+          # Authenticate with Azure PowerShell
+          Write-Host "🔐 Authenticating with Azure PowerShell..." -ForegroundColor Blue
+          $context = Connect-AzAccount -ServicePrincipal -Credential $credential -Tenant $creds.tenantId -Subscription "${{ env.AZURE_SUBSCRIPTION_ID }}"
+          Write-Host "✅ Authentication successful" -ForegroundColor Green
+          
+          # Run the PowerShell deployment script
+          $scriptPath = Join-Path $env:GITHUB_WORKSPACE "scripts" "deploy-infrastructure-pwsh.ps1"
+          
+          if (Test-Path $scriptPath) {
+            Write-Host "🚀 Executing PowerShell deployment script..." -ForegroundColor Cyan
+            & $scriptPath -ResourceGroupName "${{ env.AZURE_RESOURCE_GROUP }}" -Location "${{ env.AZURE_LOCATION }}" -EnvironmentName "zabbix-aks-${{ github.run_number }}" -SubscriptionId "${{ env.AZURE_SUBSCRIPTION_ID }}"
+            
+            if ($LASTEXITCODE -eq 0) {
+              Write-Host "✅ PowerShell deployment completed successfully!" -ForegroundColor Green
+            } else {
+              throw "PowerShell deployment script exited with code $LASTEXITCODE"
+            }
+          } else {
+            Write-Host "❌ PowerShell deployment script not found at: $scriptPath" -ForegroundColor Red
+            exit 1
+          }
+          
+        } catch {
+          Write-Host "❌ PowerShell deployment failed: $($_.Exception.Message)" -ForegroundColor Red
+          Write-Host "Stack trace: $($_.ScriptStackTrace)" -ForegroundColor Red
           exit 1
         }
 
@@ -700,3 +735,70 @@ jobs:
       with:
         name: deployment-report
         path: deployment-report.md
+
+  # PowerShell-Only Deployment (Alternative for Azure CLI issues)
+  deploy-infrastructure-powershell:
+    runs-on: windows-latest
+    environment: production
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.force_powershell == 'true' }}
+    outputs:
+      aks-cluster-name: ${{ steps.deploy-pwsh-only.outputs.AKS_CLUSTER_NAME }}
+      resource-group: ${{ steps.deploy-pwsh-only.outputs.AZURE_RESOURCE_GROUP }}
+      container-registry: ${{ steps.deploy-pwsh-only.outputs.CONTAINER_REGISTRY_ENDPOINT }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: PowerShell-Only Azure Infrastructure Deployment
+      id: deploy-pwsh-only
+      shell: pwsh
+      run: |
+        Write-Host "🚀 Starting PowerShell-only deployment (Azure CLI alternative)..." -ForegroundColor Cyan
+        
+        try {
+          # Install Azure PowerShell modules
+          Write-Host "📦 Installing Azure PowerShell modules..." -ForegroundColor Yellow
+          Install-Module -Name Az -Force -AllowClobber -Scope CurrentUser -Repository PSGallery
+          
+          # Import required modules
+          Import-Module Az.Accounts -Force
+          Import-Module Az.Resources -Force
+          
+          # Parse credentials and authenticate
+          $creds = '${{ secrets.AZURE_CREDENTIALS }}' | ConvertFrom-Json
+          $securePassword = ConvertTo-SecureString $creds.clientSecret -AsPlainText -Force
+          $credential = New-Object System.Management.Automation.PSCredential($creds.clientId, $securePassword)
+          
+          # Authenticate with Azure PowerShell
+          Write-Host "🔐 Authenticating with Azure PowerShell..." -ForegroundColor Blue
+          $context = Connect-AzAccount -ServicePrincipal -Credential $credential -Tenant $creds.tenantId -Subscription "${{ env.AZURE_SUBSCRIPTION_ID }}"
+          Write-Host "✅ Authentication successful to: $($context.Context.Subscription.Name)" -ForegroundColor Green
+          
+          # Verify resource group access
+          $resourceGroup = Get-AzResourceGroup -Name "${{ env.AZURE_RESOURCE_GROUP }}" -ErrorAction SilentlyContinue
+          if (-not $resourceGroup) {
+            throw "Cannot access resource group '${{ env.AZURE_RESOURCE_GROUP }}'"
+          }
+          Write-Host "✅ Resource group access confirmed" -ForegroundColor Green
+          
+          # Deploy using PowerShell script
+          $scriptPath = Join-Path $env:GITHUB_WORKSPACE "scripts" "deploy-infrastructure-pwsh.ps1"
+          
+          if (Test-Path $scriptPath) {
+            Write-Host "🚀 Executing PowerShell deployment script..." -ForegroundColor Cyan
+            & $scriptPath -ResourceGroupName "${{ env.AZURE_RESOURCE_GROUP }}" -Location "${{ env.AZURE_LOCATION }}" -EnvironmentName "zabbix-aks-${{ github.run_number }}" -SubscriptionId "${{ env.AZURE_SUBSCRIPTION_ID }}"
+            
+            if ($LASTEXITCODE -eq 0) {
+              Write-Host "✅ PowerShell-only deployment completed successfully!" -ForegroundColor Green
+            } else {
+              throw "PowerShell deployment script failed with exit code $LASTEXITCODE"
+            }
+          } else {
+            throw "PowerShell deployment script not found at: $scriptPath"
+          }
+          
+        } catch {
+          Write-Host "❌ PowerShell deployment failed: $($_.Exception.Message)" -ForegroundColor Red
+          exit 1
+        }
