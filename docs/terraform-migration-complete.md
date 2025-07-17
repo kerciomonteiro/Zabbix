@@ -2,7 +2,11 @@
 
 ## 🎯 Migration Summary
 
-✅ **COMPLETED**: Successfully replaced Bicep-based infrastructure deployment with Terraform and ARM templates.
+✅ **COMPLETED**: Suc4. **Legacy Files**: All legacy files have been removed:
+   - ~~`infra/main.bicep`~~ - Removed (was deprecated Bicep template)
+   - ~~`azure.yaml`~~ - Removed (was deprecated AZD configuration)
+   - ~~`install-azd.ps1`~~ - Removed (was AZD installation script)
+   - All AZD-specific scripts have been removedsfully replaced Bicep-based infrastructure deployment with Terraform and ARM templates.
 
 ### What Was Accomplished:
 
@@ -29,12 +33,20 @@
    - README.md reflects new Terraform-first approach
    - Added manual deployment instructions for both methods
    - Updated project structure documentation
-   - Marked legacy files as deprecated
+   - Removed legacy file references
 
 4. **Enhanced Validation Scripts**:
    - Updated verification script to check Terraform configurations
    - Added ARM template JSON validation
-   - Marked Bicep checks as legacy/deprecated
+   - Removed deprecated Bicep checks
+
+5. **Cleanup of Legacy Files**: ✅ **COMPLETED**
+   - Removed `azure.yaml` (AZD configuration)
+   - Removed `install-azd.ps1` (AZD installation script)
+   - Removed `infra/main.bicep` (Bicep template)
+   - Removed `infra/main.parameters.json` (Bicep parameters)
+   - Removed `infra/main.json` (generated file)
+   - Removed AZD-specific scripts: `setup-deployment.ps1`, `verify-deployment.ps1`, `test-template-local.sh`
 
 ## 🚀 Next Steps
 
@@ -44,10 +56,14 @@
 - [ ] Test ARM template fallback
 - [ ] Verify all application components deploy correctly
 
-### 2. Clean Up Legacy References (Optional)
-- [ ] Remove or archive `infra/main.bicep` if no longer needed
-- [ ] Remove `azure.yaml` if AZD is completely deprecated
-- [ ] Clean up any remaining AZD references in scripts
+### 2. Clean Up Legacy References ✅ **COMPLETED**
+- [x] Removed `azure.yaml` (AZD configuration file)
+- [x] Removed `install-azd.ps1` (AZD installation script)
+- [x] Removed `infra/main.bicep` (Bicep template)
+- [x] Removed `infra/main.parameters.json` (Bicep parameters)
+- [x] Removed `infra/main.json` (generated file)
+- [x] Removed deprecated scripts: `setup-deployment.ps1`, `verify-deployment.ps1`, `test-template-local.sh`
+- [x] Updated documentation to remove references to deleted files
 
 ### 3. Terraform State Management (Recommended)
 - [ ] Set up remote state backend (Azure Storage Account)

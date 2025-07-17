@@ -229,23 +229,12 @@ try {
         Add-TestResult "ARM Template Exists" $false "ARM template not found at $armPath"
     }
     
-    # Legacy Bicep template (deprecated but still check)
+    # Legacy Bicep template (removed)
     $bicepPath = Join-Path $PSScriptRoot ".." "infra" "main.bicep"
     if (Test-Path $bicepPath) {
-        Add-TestResult "Bicep Template Exists (Legacy)" $true "⚠️ Deprecated - use Terraform or ARM instead"
-        
-        try {
-            $buildOutput = az bicep build --file $bicepPath 2>&1
-            if ($LASTEXITCODE -eq 0) {
-                Add-TestResult "Bicep Template Validation (Legacy)" $true "Template builds successfully (deprecated)"
-            } else {
-                Add-TestResult "Bicep Template Validation (Legacy)" $false "Build errors: $buildOutput"
-            }
-        } catch {
-            Add-TestResult "Bicep Template Validation (Legacy)" $false "Cannot validate template"
-        }
+        Add-TestResult "Bicep Template Exists (Unexpected)" $false "⚠️ Found legacy Bicep file - should have been removed"
     } else {
-        Add-TestResult "Bicep Template Exists (Legacy)" $false "Template not found (OK - using Terraform/ARM)"
+        Add-TestResult "Legacy Bicep Cleanup" $true "✅ Legacy Bicep files properly removed"
     }
 
     # Check 6: Kubernetes manifests

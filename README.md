@@ -289,7 +289,6 @@ After successful deployment:
 │   │   ├── outputs.tf        # Output values
 │   │   ├── terraform.tfvars.example  # Example variables file
 │   │   └── README.md         # Terraform-specific documentation
-│   ├── main.bicep             # Legacy Bicep template (deprecated)
 │   └── main-arm.json         # ARM template (fallback)
 ├── k8s/
 │   ├── zabbix-config.yaml     # Namespace and configuration
@@ -304,8 +303,8 @@ After successful deployment:
 ├── docs/
 │   ├── ssl-configuration.md   # SSL setup guide
 │   ├── deployment-guide.md    # Detailed deployment guide
-│   └── manual-service-principal-setup.md  # Service principal setup
-├── azure.yaml                 # Legacy AZD configuration (deprecated)
+│   ├── manual-service-principal-setup.md  # Service principal setup
+│   └── terraform-migration-complete.md    # Migration documentation
 └── README.md                  # This file
 ```
 
