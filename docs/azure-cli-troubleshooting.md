@@ -214,3 +214,48 @@ For persistent issues:
 - AZD: Latest stable (fallback installation)
 
 Last updated: January 2025
+
+## ARM Templates vs Bicep
+
+**Question: Should I use ARM templates instead of Bicep?**
+
+Both approaches are included in the deployment workflow:
+
+### Bicep Templates (Primary)
+- **Advantages**: Cleaner syntax, better readability, better tooling support
+- **Used by**: Azure CLI fallback method
+- **Location**: `infra/main.bicep`
+
+### ARM Templates (Alternative)
+- **Advantages**: JSON format, sometimes better compatibility with certain Azure CLI versions
+- **Used by**: ARM template fallback method
+- **Location**: `infra/main-arm.json`
+
+### Deployment Cascade
+The workflow attempts deployment in this order:
+1. **Azure Developer CLI (AZD)** with Bicep - Primary method
+2. **Azure CLI with Bicep** - First fallback (with retry logic)
+3. **ARM template with Azure CLI** - Alternative fallback 
+4. **Azure PowerShell with Bicep** - Final fallback
+
+### When to Use ARM vs Bicep
+- **Bicep is recommended** for most scenarios (cleaner, modern)
+- **ARM templates** can be useful when:
+  - Bicep compilation has issues
+  - Specific Azure CLI versions have Bicep bugs
+  - JSON format is preferred for tooling compatibility
+
+### Authentication Error Resolution
+The **"Please run 'az login' to setup account"** error is now handled by:
+- **Smart re-authentication**: Automatically detects auth loss and re-authenticates
+- **Selective cache clearing**: Only clears problematic cache files, preserves auth tokens
+- **Multiple fallback methods**: If one method fails, others will attempt with fresh auth
+
+### Current Enhancement Features
+✅ **Authentication persistence**: Maintains login across retry attempts  
+✅ **Selective cache management**: Avoids breaking authentication  
+✅ **Multiple template formats**: Both Bicep and ARM available  
+✅ **Enhanced retry logic**: 3 attempts with exponential backoff  
+✅ **PowerShell alternative**: Uses completely different Azure SDK  
+
+The workflow is now highly resilient and should handle most authentication and deployment issues automatically.

@@ -225,14 +225,27 @@ jobs:
           while [ $attempt -le $max_attempts ]; do
             echo "🔄 Deployment attempt $attempt of $max_attempts..."
             
-            # Clear any existing Azure CLI cache to avoid "content consumed" errors
-            rm -rf ~/.azure/azureProfile.json ~/.azure/clouds.config 2>/dev/null || true
+            # Clear only specific cache files to avoid "content consumed" errors
+            # But preserve authentication tokens
+            rm -rf ~/.azure/commandIndex.json ~/.azure/telemetry.txt 2>/dev/null || true
             
-            # Re-authenticate to ensure fresh tokens
-            az account show > /dev/null || {
-              echo "❌ Authentication lost, attempting to re-authenticate..."
-              exit 1
-            }
+            # Verify authentication without clearing auth tokens
+            echo "🔐 Verifying Azure authentication..."
+            if ! az account show --output none 2>/dev/null; then
+              echo "❌ Authentication lost, re-authenticating with service principal..."
+              # Re-authenticate using the stored credentials
+              echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r .clientSecret | az login \
+                --service-principal \
+                --username "$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r .clientId)" \
+                --tenant "$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r .tenantId)" \
+                --password-stdin > /dev/null
+              
+              # Set the subscription
+              az account set --subscription "${{ env.AZURE_SUBSCRIPTION_ID }}"
+              echo "✅ Re-authentication successful"
+            else
+              echo "✅ Authentication verified"
+            fi
             
             # Set deployment timeout and try deployment
             export AZURE_HTTP_USER_AGENT="GitHub-Actions-Zabbix-Deploy"
@@ -260,7 +273,7 @@ jobs:
               echo "$DEPLOYMENT_OUTPUT"
               
               # Check if it's a retryable error
-              if echo "$DEPLOYMENT_OUTPUT" | grep -i "content.*already.*consumed\|timeout\|network\|connection"; then
+              if echo "$DEPLOYMENT_OUTPUT" | grep -i "content.*already.*consumed\|timeout\|network\|connection\|login"; then
                 if [ $attempt -lt $max_attempts ]; then
                   echo "⏳ Retryable error detected. Waiting ${delay}s before retry..."
                   sleep $delay
@@ -348,6 +361,74 @@ jobs:
           exit 1
         }
 
+    - name: Provision Infrastructure with ARM Template (Alternative Fallback)
+      id: deploy-infra-arm
+      if: steps.deploy-infra-azd.outputs.DEPLOYMENT_SUCCESS != 'true' && steps.deploy-infra-cli.outputs.DEPLOYMENT_SUCCESS != 'true'
+      run: |
+        echo "🚀 Attempting deployment with ARM template (alternative to Bicep)..."
+        
+        # Generate deployment name with timestamp
+        TIMESTAMP=$(date +%s)
+        ARM_DEPLOYMENT_NAME="zabbix-arm-deploy-${{ github.run_number }}-$TIMESTAMP"
+        echo "ARM Deployment name: $ARM_DEPLOYMENT_NAME"
+        
+        # Verify authentication first
+        echo "🔐 Verifying Azure authentication for ARM deployment..."
+        if ! az account show --output none 2>/dev/null; then
+          echo "❌ Authentication lost, re-authenticating..."
+          echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r .clientSecret | az login \
+            --service-principal \
+            --username "$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r .clientId)" \
+            --tenant "$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r .tenantId)" \
+            --password-stdin > /dev/null
+          az account set --subscription "${{ env.AZURE_SUBSCRIPTION_ID }}"
+        fi
+        
+        # Deploy ARM template with timeout and error handling
+        echo "🏗️ Deploying ARM template..."
+        set +e  # Don't exit on error
+        ARM_DEPLOYMENT_OUTPUT=$(timeout 1800 az deployment group create \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --template-file infra/main-arm.json \
+          --parameters environmentName="zabbix-aks-${{ github.run_number }}" \
+                       location="${{ env.AZURE_LOCATION }}" \
+          --name "$ARM_DEPLOYMENT_NAME" \
+          --mode Incremental \
+          --output json \
+          --only-show-errors 2>&1)
+        ARM_DEPLOYMENT_EXIT_CODE=$?
+        set -e  # Re-enable exit on error
+        
+        if [ $ARM_DEPLOYMENT_EXIT_CODE -ne 0 ]; then
+          echo "❌ ARM template deployment failed with exit code $ARM_DEPLOYMENT_EXIT_CODE"
+          echo "Error output:"
+          echo "$ARM_DEPLOYMENT_OUTPUT"
+          echo "DEPLOYMENT_SUCCESS=false" >> $GITHUB_OUTPUT
+        else
+          echo "✅ ARM template deployment successful!"
+          
+          # Extract outputs
+          AKS_CLUSTER_NAME=$(echo "$ARM_DEPLOYMENT_OUTPUT" | jq -r '.properties.outputs.AKS_CLUSTER_NAME.value // empty')
+          CONTAINER_REGISTRY_ENDPOINT=$(echo "$ARM_DEPLOYMENT_OUTPUT" | jq -r '.properties.outputs.CONTAINER_REGISTRY_ENDPOINT.value // empty')
+          
+          if [ -z "$AKS_CLUSTER_NAME" ] || [ "$AKS_CLUSTER_NAME" = "null" ]; then
+            echo "❌ Failed to get AKS cluster name from ARM deployment outputs"
+            echo "DEPLOYMENT_SUCCESS=false" >> $GITHUB_OUTPUT
+          else
+            # Set outputs
+            echo "AKS_CLUSTER_NAME=$AKS_CLUSTER_NAME" >> $GITHUB_OUTPUT
+            echo "AZURE_RESOURCE_GROUP=${{ env.AZURE_RESOURCE_GROUP }}" >> $GITHUB_OUTPUT
+            echo "CONTAINER_REGISTRY_ENDPOINT=$CONTAINER_REGISTRY_ENDPOINT" >> $GITHUB_OUTPUT
+            echo "DEPLOYMENT_METHOD=arm" >> $GITHUB_OUTPUT
+            echo "DEPLOYMENT_SUCCESS=true" >> $GITHUB_OUTPUT
+            
+            echo "✅ ARM Infrastructure deployed successfully!"
+            echo "   AKS Cluster: $AKS_CLUSTER_NAME"
+            echo "   Resource Group: ${{ env.AZURE_RESOURCE_GROUP }}"
+            echo "   Container Registry: $CONTAINER_REGISTRY_ENDPOINT"
+          fi
+        fi
+
     - name: Set Infrastructure Outputs
       id: deploy-infra
       run: |
@@ -373,19 +454,19 @@ jobs:
           echo "CONTAINER_REGISTRY_ENDPOINT=${{ steps.deploy-infra-pwsh.outputs.CONTAINER_REGISTRY_ENDPOINT }}" >> $GITHUB_OUTPUT
           echo "DEPLOYMENT_SUCCESS=true" >> $GITHUB_OUTPUT
           echo "✅ Used Azure PowerShell for deployment (final fallback)" >> $GITHUB_STEP_SUMMARY
+        elif [ "${{ steps.deploy-infra-arm.outputs.DEPLOYMENT_SUCCESS }}" = "true" ]; then
+          echo "Using ARM template deployment outputs"
+          echo "AKS_CLUSTER_NAME=${{ steps.deploy-infra-arm.outputs.AKS_CLUSTER_NAME }}" >> $GITHUB_OUTPUT
+          echo "AZURE_RESOURCE_GROUP=${{ steps.deploy-infra-arm.outputs.AZURE_RESOURCE_GROUP }}" >> $GITHUB_OUTPUT
+          echo "CONTAINER_REGISTRY_ENDPOINT=${{ steps.deploy-infra-arm.outputs.CONTAINER_REGISTRY_ENDPOINT }}" >> $GITHUB_OUTPUT
+          echo "DEPLOYMENT_SUCCESS=true" >> $GITHUB_OUTPUT
+          echo "✅ Used ARM template for deployment (alternative fallback)" >> $GITHUB_STEP_SUMMARY
         else
           echo "❌ All deployment methods failed or returned empty outputs" >> $GITHUB_STEP_SUMMARY
           echo "AZD success: ${{ steps.deploy-infra-azd.outputs.DEPLOYMENT_SUCCESS }}"
           echo "CLI success: ${{ steps.deploy-infra-cli.outputs.DEPLOYMENT_SUCCESS }}"
           echo "PowerShell success: ${{ steps.deploy-infra-pwsh.outputs.DEPLOYMENT_SUCCESS }}"
-          echo "DEPLOYMENT_SUCCESS=false" >> $GITHUB_OUTPUT
-          exit 1
-        fi
-          echo "✅ Used Azure CLI for deployment (AZD fallback)" >> $GITHUB_STEP_SUMMARY
-        else
-          echo "❌ Both AZD and Azure CLI deployments failed or returned empty outputs" >> $GITHUB_STEP_SUMMARY
-          echo "AZD success: ${{ steps.deploy-infra-azd.outputs.DEPLOYMENT_SUCCESS }}"
-          echo "CLI success: ${{ steps.deploy-infra-cli.outputs.DEPLOYMENT_SUCCESS }}"
+          echo "ARM success: ${{ steps.deploy-infra-arm.outputs.DEPLOYMENT_SUCCESS }}"
           echo "DEPLOYMENT_SUCCESS=false" >> $GITHUB_OUTPUT
           exit 1
         fi
@@ -404,6 +485,16 @@ jobs:
           echo "AKS Cluster Name: ${{ steps.deploy-infra-cli.outputs.AKS_CLUSTER_NAME }}"
           echo "Resource Group: ${{ steps.deploy-infra-cli.outputs.AZURE_RESOURCE_GROUP }}"
           echo "Container Registry: ${{ steps.deploy-infra-cli.outputs.CONTAINER_REGISTRY_ENDPOINT }}"
+        elif [ "${{ steps.deploy-infra-pwsh.outputs.DEPLOYMENT_SUCCESS }}" = "true" ]; then
+          echo "✅ Deployment Method: Azure PowerShell (Final Fallback)"
+          echo "AKS Cluster Name: ${{ steps.deploy-infra-pwsh.outputs.AKS_CLUSTER_NAME }}"
+          echo "Resource Group: ${{ steps.deploy-infra-pwsh.outputs.AZURE_RESOURCE_GROUP }}"
+          echo "Container Registry: ${{ steps.deploy-infra-pwsh.outputs.CONTAINER_REGISTRY_ENDPOINT }}"
+        elif [ "${{ steps.deploy-infra-arm.outputs.DEPLOYMENT_SUCCESS }}" = "true" ]; then
+          echo "✅ Deployment Method: ARM Template (Alternative Fallback)"
+          echo "AKS Cluster Name: ${{ steps.deploy-infra-arm.outputs.AKS_CLUSTER_NAME }}"
+          echo "Resource Group: ${{ steps.deploy-infra-arm.outputs.AZURE_RESOURCE_GROUP }}"
+          echo "Container Registry: ${{ steps.deploy-infra-arm.outputs.CONTAINER_REGISTRY_ENDPOINT }}"
         else
           echo "❌ No successful deployment to display"
         fi
