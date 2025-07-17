@@ -1,5 +1,7 @@
 # Zabbix Server on Azure Kubernetes Service (AKS)
 
+> **✅ Status: Production Ready** - All deployment issues resolved, infrastructure validated and tested
+
 This repository contains the Infrastructure as Code (IaC) and Kubernetes manifests to deploy a complete Zabbix monitoring solution on Azure Kubernetes Service (AKS) with the following components:
 
 - **AKS Cluster** with system and worker node pools
