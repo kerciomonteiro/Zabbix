@@ -29,23 +29,23 @@
     }
   },
   "variables": {
-    "resourceToken": "[take(uniqueString(subscription().id, resourceGroup().id, parameters('environmentName')), 8)]",
+    "devopsNamingSuffix": "[concat('devops-', parameters('location'))]",
     "resourceNames": {
-      "vnet": "[concat('vnet-', variables('resourceToken'))]",
-      "aksCluster": "[concat('aks-', variables('resourceToken'))]",
-      "aksNodeRg": "[concat('rg-', parameters('environmentName'), '-aks-nodes-', variables('resourceToken'))]",
+      "vnet": "[concat('vnet-', variables('devopsNamingSuffix'))]",
+      "aksCluster": "[concat('aks-', variables('devopsNamingSuffix'))]",
+      "aksNodeRg": "[concat('rg-', parameters('environmentName'), '-aks-nodes-', variables('devopsNamingSuffix'))]",
       "subnet": {
-        "aks": "[concat('subnet-aks-', variables('resourceToken'))]",
-        "appgw": "[concat('subnet-appgw-', variables('resourceToken'))]"
+        "aks": "[concat('subnet-aks-', variables('devopsNamingSuffix'))]",
+        "appgw": "[concat('subnet-appgw-', variables('devopsNamingSuffix'))]"
       },
-      "identity": "[concat('id-', variables('resourceToken'))]",
-      "logAnalytics": "[concat('law-', variables('resourceToken'))]",
-      "containerRegistry": "[concat('acr', toLower(replace(replace(parameters('environmentName'), '-', ''), '_', '')), variables('resourceToken'))]",
-      "appGateway": "[concat('appgw-', variables('resourceToken'))]",
-      "publicIp": "[concat('pip-appgw-', variables('resourceToken'))]",
+      "identity": "[concat('id-', variables('devopsNamingSuffix'))]",
+      "logAnalytics": "[concat('law-', variables('devopsNamingSuffix'))]",
+      "containerRegistry": "[concat('acr', toLower(replace(replace(parameters('environmentName'), '-', ''), '_', '')), 'devops', toLower(parameters('location')))]",
+      "appGateway": "[concat('appgw-', variables('devopsNamingSuffix'))]",
+      "publicIp": "[concat('pip-appgw-', variables('devopsNamingSuffix'))]",
       "nsg": {
-        "aks": "[concat('nsg-aks-', variables('resourceToken'))]",
-        "appgw": "[concat('nsg-appgw-', variables('resourceToken'))]"
+        "aks": "[concat('nsg-aks-', variables('devopsNamingSuffix'))]",
+        "appgw": "[concat('nsg-appgw-', variables('devopsNamingSuffix'))]"
       }
     }
   },
@@ -239,7 +239,7 @@
       "properties": {
         "publicIPAllocationMethod": "Static",
         "dnsSettings": {
-          "domainNameLabel": "[concat('zabbix-', variables('resourceToken'))]"
+          "domainNameLabel": "[concat('dal2-devmon-mgt-', variables('devopsNamingSuffix'))]"
         }
       }
     },

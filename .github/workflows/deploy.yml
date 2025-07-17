@@ -135,14 +135,15 @@ jobs:
       run: |
         echo "🔧 Initializing AZD environment..."
         
-        # Initialize AZD environment with proper name
+        # Initialize AZD environment with DevOps naming convention
         ENV_SUFFIX="${{ github.event.inputs.environment_suffix }}"
         if [ -n "$ENV_SUFFIX" ]; then
-          ENV_NAME="zabbix-aks-${{ github.run_number }}-$ENV_SUFFIX"
+          ENV_NAME="zabbix-devops-${{ env.AZURE_LOCATION }}-${{ github.run_number }}-$ENV_SUFFIX"
         else
-          ENV_NAME="zabbix-aks-${{ github.run_number }}"
+          ENV_NAME="zabbix-devops-${{ env.AZURE_LOCATION }}-${{ github.run_number }}"
         fi
         echo "Environment name: $ENV_NAME"
+        echo "This will create resources with naming pattern: resourcename-devops-${{ env.AZURE_LOCATION }}"
         
         # Initialize the environment non-interactively
         azd env new "$ENV_NAME" --location "${{ env.AZURE_LOCATION }}" --subscription "${{ env.AZURE_SUBSCRIPTION_ID }}"
@@ -216,15 +217,19 @@ jobs:
           fi
         done
         
-        # Check for naming conflicts
+        # Check for naming conflicts with new DevOps naming convention
         echo "Checking for potential resource naming conflicts..."
-        ENV_NAME="zabbix-aks-${{ github.run_number }}"
-        RESOURCE_TOKEN=$(echo -n "${{ env.AZURE_SUBSCRIPTION_ID }}${{ env.AZURE_RESOURCE_GROUP }}$ENV_NAME" | sha256sum | cut -c1-8)
-        POTENTIAL_ACR_NAME="acr${ENV_NAME//-/}${RESOURCE_TOKEN}"
+        ENV_SUFFIX="${{ github.event.inputs.environment_suffix }}"
+        if [ -n "$ENV_SUFFIX" ]; then
+          ENV_NAME="zabbix-devops-${{ env.AZURE_LOCATION }}-${{ github.run_number }}-$ENV_SUFFIX"
+        else
+          ENV_NAME="zabbix-devops-${{ env.AZURE_LOCATION }}-${{ github.run_number }}"
+        fi
+        POTENTIAL_ACR_NAME="acr${ENV_NAME//-/}devops${{ env.AZURE_LOCATION }}"
         
         echo "Environment name: $ENV_NAME"
-        echo "Resource token: $RESOURCE_TOKEN"
         echo "Potential ACR name: $POTENTIAL_ACR_NAME"
+        echo "Resources will use naming pattern: resourcename-devops-${{ env.AZURE_LOCATION }}"
         
         # Check if ACR name is available
         if az acr check-name --name "$POTENTIAL_ACR_NAME" --query nameAvailable -o tsv | grep -q "false"; then
@@ -250,11 +255,21 @@ jobs:
         echo "Running what-if analysis..."
         DEPLOYMENT_NAME="zabbix-validation-${{ github.run_number }}"
         
+        # Generate environment name with DevOps naming convention
+        ENV_SUFFIX="${{ github.event.inputs.environment_suffix }}"
+        if [ -n "$ENV_SUFFIX" ]; then
+          DEPLOYMENT_ENV_NAME="zabbix-devops-${{ env.AZURE_LOCATION }}-${{ github.run_number }}-$ENV_SUFFIX"
+        else
+          DEPLOYMENT_ENV_NAME="zabbix-devops-${{ env.AZURE_LOCATION }}-${{ github.run_number }}"
+        fi
+        echo "Deployment environment name: $DEPLOYMENT_ENV_NAME"
+        echo "Resources will be named with pattern: resourcename-devops-${{ env.AZURE_LOCATION }}"
+        
         # Use what-if to validate without deploying
         az deployment group what-if \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
           --template-file infra/main.bicep \
-          --parameters environmentName="zabbix-aks-${{ github.run_number }}" \
+          --parameters environmentName="$DEPLOYMENT_ENV_NAME" \
                        location="${{ env.AZURE_LOCATION }}" \
           --name "$DEPLOYMENT_NAME" || {
           echo "❌ What-if analysis failed"
@@ -267,6 +282,16 @@ jobs:
       if: steps.deploy-infra-azd.outputs.DEPLOYMENT_SUCCESS != 'true'
       run: |
         echo "🚀 Deploying infrastructure using Azure CLI (AZD fallback)..."
+        
+        # Generate environment name with DevOps naming convention
+        ENV_SUFFIX="${{ github.event.inputs.environment_suffix }}"
+        if [ -n "$ENV_SUFFIX" ]; then
+          DEPLOYMENT_ENV_NAME="zabbix-devops-${{ env.AZURE_LOCATION }}-${{ github.run_number }}-$ENV_SUFFIX"
+        else
+          DEPLOYMENT_ENV_NAME="zabbix-devops-${{ env.AZURE_LOCATION }}-${{ github.run_number }}"
+        fi
+        echo "Deployment environment name: $DEPLOYMENT_ENV_NAME"
+        echo "Resources will be named with pattern: resourcename-devops-${{ env.AZURE_LOCATION }}"
         
         # Generate deployment name with timestamp to avoid conflicts
         TIMESTAMP=$(date +%s)
@@ -319,7 +344,7 @@ jobs:
             DEPLOYMENT_OUTPUT=$(timeout 1800 az deployment group create \
               --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
               --template-file infra/main.bicep \
-              --parameters environmentName="zabbix-aks-${{ github.run_number }}" \
+              --parameters environmentName="$DEPLOYMENT_ENV_NAME" \
                            location="${{ env.AZURE_LOCATION }}" \
               --name "$DEPLOYMENT_NAME" \
               --mode Incremental \
@@ -388,7 +413,7 @@ jobs:
           az deployment group validate \
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
             --template-file infra/main.bicep \
-            --parameters environmentName="zabbix-aks-${{ github.run_number }}" \
+            --parameters environmentName="$DEPLOYMENT_ENV_NAME" \
                          location="${{ env.AZURE_LOCATION }}" \
             --output json 2>&1 | jq '.' || echo "Validation also failed"
           
@@ -471,11 +496,20 @@ jobs:
         
         # Deploy ARM template immediately (no retries needed - this usually works)
         echo "🏗️ Deploying ARM template (emergency fallback)..."
+        
+        # Generate environment name with DevOps naming convention
+        ENV_SUFFIX="${{ github.event.inputs.environment_suffix }}"
+        if [ -n "$ENV_SUFFIX" ]; then
+          DEPLOYMENT_ENV_NAME="zabbix-devops-${{ env.AZURE_LOCATION }}-${{ github.run_number }}-$ENV_SUFFIX"
+        else
+          DEPLOYMENT_ENV_NAME="zabbix-devops-${{ env.AZURE_LOCATION }}-${{ github.run_number }}"
+        fi
+        
         set +e  # Don't exit on error
         ARM_DEPLOYMENT_OUTPUT=$(timeout 1800 az deployment group create \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
           --template-file infra/main-arm.json \
-          --parameters environmentName="zabbix-aks-${{ github.run_number }}" \
+          --parameters environmentName="$DEPLOYMENT_ENV_NAME" \
                        location="${{ env.AZURE_LOCATION }}" \
           --name "$ARM_DEPLOYMENT_NAME" \
           --mode Incremental \
@@ -547,7 +581,18 @@ jobs:
           
           if (Test-Path $scriptPath) {
             Write-Host "🚀 Executing PowerShell deployment script..." -ForegroundColor Cyan
-            & $scriptPath -ResourceGroupName "${{ env.AZURE_RESOURCE_GROUP }}" -Location "${{ env.AZURE_LOCATION }}" -EnvironmentName "zabbix-aks-${{ github.run_number }}" -SubscriptionId "${{ env.AZURE_SUBSCRIPTION_ID }}"
+            
+            # Generate environment name with DevOps naming convention
+            $envSuffix = "${{ github.event.inputs.environment_suffix }}"
+            if ([string]::IsNullOrEmpty($envSuffix)) {
+              $deploymentEnvName = "zabbix-devops-${{ env.AZURE_LOCATION }}-${{ github.run_number }}"
+            } else {
+              $deploymentEnvName = "zabbix-devops-${{ env.AZURE_LOCATION }}-${{ github.run_number }}-$envSuffix"
+            }
+            Write-Host "Deployment environment name: $deploymentEnvName" -ForegroundColor Yellow
+            Write-Host "Resources will be named with pattern: resourcename-devops-${{ env.AZURE_LOCATION }}" -ForegroundColor Yellow
+            
+            & $scriptPath -ResourceGroupName "${{ env.AZURE_RESOURCE_GROUP }}" -Location "${{ env.AZURE_LOCATION }}" -EnvironmentName $deploymentEnvName -SubscriptionId "${{ env.AZURE_SUBSCRIPTION_ID }}"
             
             if ($LASTEXITCODE -eq 0) {
               Write-Host "✅ PowerShell deployment completed successfully!" -ForegroundColor Green
@@ -594,11 +639,20 @@ jobs:
         
         # Deploy ARM template with timeout and error handling
         echo "🏗️ Deploying ARM template..."
+        
+        # Generate environment name with DevOps naming convention
+        ENV_SUFFIX="${{ github.event.inputs.environment_suffix }}"
+        if [ -n "$ENV_SUFFIX" ]; then
+          DEPLOYMENT_ENV_NAME="zabbix-devops-${{ env.AZURE_LOCATION }}-${{ github.run_number }}-$ENV_SUFFIX"
+        else
+          DEPLOYMENT_ENV_NAME="zabbix-devops-${{ env.AZURE_LOCATION }}-${{ github.run_number }}"
+        fi
+        
         set +e  # Don't exit on error
         ARM_DEPLOYMENT_OUTPUT=$(timeout 1800 az deployment group create \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
           --template-file infra/main-arm.json \
-          --parameters environmentName="zabbix-aks-${{ github.run_number }}" \
+          --parameters environmentName="$DEPLOYMENT_ENV_NAME" \
                        location="${{ env.AZURE_LOCATION }}" \
           --name "$ARM_DEPLOYMENT_NAME" \
           --mode Incremental \
@@ -1210,7 +1264,18 @@ jobs:
           
           if (Test-Path $scriptPath) {
             Write-Host "🚀 Executing PowerShell deployment script..." -ForegroundColor Cyan
-            & $scriptPath -ResourceGroupName "${{ env.AZURE_RESOURCE_GROUP }}" -Location "${{ env.AZURE_LOCATION }}" -EnvironmentName "zabbix-aks-${{ github.run_number }}" -SubscriptionId "${{ env.AZURE_SUBSCRIPTION_ID }}"
+            
+            # Generate environment name with DevOps naming convention
+            $envSuffix = "${{ github.event.inputs.environment_suffix }}"
+            if ([string]::IsNullOrEmpty($envSuffix)) {
+              $deploymentEnvName = "zabbix-devops-${{ env.AZURE_LOCATION }}-${{ github.run_number }}"
+            } else {
+              $deploymentEnvName = "zabbix-devops-${{ env.AZURE_LOCATION }}-${{ github.run_number }}-$envSuffix"
+            }
+            Write-Host "Deployment environment name: $deploymentEnvName" -ForegroundColor Yellow
+            Write-Host "Resources will be named with pattern: resourcename-devops-${{ env.AZURE_LOCATION }}" -ForegroundColor Yellow
+            
+            & $scriptPath -ResourceGroupName "${{ env.AZURE_RESOURCE_GROUP }}" -Location "${{ env.AZURE_LOCATION }}" -EnvironmentName $deploymentEnvName -SubscriptionId "${{ env.AZURE_SUBSCRIPTION_ID }}"
             
             if ($LASTEXITCODE -eq 0) {
               Write-Host "✅ PowerShell-only deployment completed successfully!" -ForegroundColor Green

@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.36.177.2456",
-      "templateHash": "7174688542379339425"
+      "templateHash": "2518900418237015822"
     }
   },
   "parameters": {
@@ -33,23 +33,23 @@
     }
   },
   "variables": {
-    "resourceToken": "[take(uniqueString(subscription().id, resourceGroup().id, parameters('environmentName')), 8)]",
+    "devopsNamingSuffix": "[format('devops-{0}', parameters('location'))]",
     "resourceNames": {
-      "vnet": "[format('vnet-{0}', variables('resourceToken'))]",
-      "aksCluster": "[format('aks-{0}', variables('resourceToken'))]",
-      "aksNodeRg": "[format('rg-{0}-aks-nodes-{1}', parameters('environmentName'), variables('resourceToken'))]",
+      "vnet": "[format('vnet-{0}', variables('devopsNamingSuffix'))]",
+      "aksCluster": "[format('aks-{0}', variables('devopsNamingSuffix'))]",
+      "aksNodeRg": "[format('rg-{0}-aks-nodes-{1}', parameters('environmentName'), variables('devopsNamingSuffix'))]",
       "subnet": {
-        "aks": "[format('subnet-aks-{0}', variables('resourceToken'))]",
-        "appgw": "[format('subnet-appgw-{0}', variables('resourceToken'))]"
+        "aks": "[format('subnet-aks-{0}', variables('devopsNamingSuffix'))]",
+        "appgw": "[format('subnet-appgw-{0}', variables('devopsNamingSuffix'))]"
       },
-      "identity": "[format('id-{0}', variables('resourceToken'))]",
-      "logAnalytics": "[format('law-{0}', variables('resourceToken'))]",
-      "containerRegistry": "[format('acr{0}{1}', toLower(replace(replace(parameters('environmentName'), '-', ''), '_', '')), variables('resourceToken'))]",
-      "appGateway": "[format('appgw-{0}', variables('resourceToken'))]",
-      "publicIp": "[format('pip-appgw-{0}', variables('resourceToken'))]",
+      "identity": "[format('id-{0}', variables('devopsNamingSuffix'))]",
+      "logAnalytics": "[format('law-{0}', variables('devopsNamingSuffix'))]",
+      "containerRegistry": "[format('acr{0}devops{1}', toLower(replace(replace(parameters('environmentName'), '-', ''), '_', '')), toLower(parameters('location')))]",
+      "appGateway": "[format('appgw-{0}', variables('devopsNamingSuffix'))]",
+      "publicIp": "[format('pip-appgw-{0}', variables('devopsNamingSuffix'))]",
       "nsg": {
-        "aks": "[format('nsg-aks-{0}', variables('resourceToken'))]",
-        "appgw": "[format('nsg-appgw-{0}', variables('resourceToken'))]"
+        "aks": "[format('nsg-aks-{0}', variables('devopsNamingSuffix'))]",
+        "appgw": "[format('nsg-appgw-{0}', variables('devopsNamingSuffix'))]"
       }
     }
   },
@@ -264,7 +264,7 @@
       "properties": {
         "publicIPAllocationMethod": "Static",
         "dnsSettings": {
-          "domainNameLabel": "[format('dal2-devmon-mgt-{0}', variables('resourceToken'))]"
+          "domainNameLabel": "[format('dal2-devmon-mgt-{0}', variables('devopsNamingSuffix'))]"
         }
       }
     },
@@ -394,7 +394,7 @@
         }
       },
       "properties": {
-        "dnsPrefix": "[format('aks-{0}', variables('resourceToken'))]",
+        "dnsPrefix": "[format('aks-{0}', variables('devopsNamingSuffix'))]",
         "nodeResourceGroup": "[variables('resourceNames').aksNodeRg]",
         "kubernetesVersion": "1.29.9",
         "enableRBAC": true,

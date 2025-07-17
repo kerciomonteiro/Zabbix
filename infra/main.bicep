@@ -12,26 +12,26 @@ param environmentName string
 @description('Principal ID of the deployment user for role assignments')
 param principalId string = ''
 
-@description('Unique suffix to ensure resource names are globally unique')
-var resourceToken = take(uniqueString(subscription().id, resourceGroup().id, environmentName), 8)
+@description('Custom naming suffix for DevOps resources')
+var devopsNamingSuffix = 'devops-${location}'
 
-// Create resource names with resource token
+// Create resource names with DevOps naming convention: resourcename-devops-regionname
 var resourceNames = {
-  vnet: 'vnet-${resourceToken}'
-  aksCluster: 'aks-${resourceToken}'
-  aksNodeRg: 'rg-${environmentName}-aks-nodes-${resourceToken}'
+  vnet: 'vnet-${devopsNamingSuffix}'
+  aksCluster: 'aks-${devopsNamingSuffix}'
+  aksNodeRg: 'rg-${environmentName}-aks-nodes-${devopsNamingSuffix}'
   subnet: {
-    aks: 'subnet-aks-${resourceToken}'
-    appgw: 'subnet-appgw-${resourceToken}'
+    aks: 'subnet-aks-${devopsNamingSuffix}'
+    appgw: 'subnet-appgw-${devopsNamingSuffix}'
   }
-  identity: 'id-${resourceToken}'
-  logAnalytics: 'law-${resourceToken}'
-  containerRegistry: 'acr${toLower(replace(replace(environmentName, '-', ''), '_', ''))}${resourceToken}'
-  appGateway: 'appgw-${resourceToken}'
-  publicIp: 'pip-appgw-${resourceToken}'
+  identity: 'id-${devopsNamingSuffix}'
+  logAnalytics: 'law-${devopsNamingSuffix}'
+  containerRegistry: 'acr${toLower(replace(replace(environmentName, '-', ''), '_', ''))}devops${toLower(location)}'
+  appGateway: 'appgw-${devopsNamingSuffix}'
+  publicIp: 'pip-appgw-${devopsNamingSuffix}'
   nsg: {
-    aks: 'nsg-aks-${resourceToken}'
-    appgw: 'nsg-appgw-${resourceToken}'
+    aks: 'nsg-aks-${devopsNamingSuffix}'
+    appgw: 'nsg-appgw-${devopsNamingSuffix}'
   }
 }
 
@@ -239,7 +239,7 @@ resource publicIp 'Microsoft.Network/publicIPAddresses@2024-05-01' = {
   properties: {
     publicIPAllocationMethod: 'Static'
     dnsSettings: {
-      domainNameLabel: 'dal2-devmon-mgt-${resourceToken}'
+      domainNameLabel: 'dal2-devmon-mgt-${devopsNamingSuffix}'
     }
   }
 }
@@ -365,7 +365,7 @@ resource aksCluster 'Microsoft.ContainerService/managedClusters@2024-09-01' = {
     }
   }
   properties: {
-    dnsPrefix: 'aks-${resourceToken}'
+    dnsPrefix: 'aks-${devopsNamingSuffix}'
     nodeResourceGroup: resourceNames.aksNodeRg
     kubernetesVersion: '1.29.9'
     enableRBAC: true
