@@ -7,6 +7,9 @@ resource "azurerm_kubernetes_cluster" "main" {
   kubernetes_version  = var.kubernetes_version
   node_resource_group = local.resource_names.aks_node_rg
   tags                = local.common_tags
+  
+  # Set SKU tier to match existing cluster (Free tier)
+  sku_tier = "Free"
 
   # System Node Pool (required)
   default_node_pool {

@@ -31,6 +31,22 @@ provider "azurerm" {
 provider "azuread" {
 }
 
+# Import blocks for existing NSG associations that need to be managed by Terraform
+import {
+  to = azurerm_subnet_network_security_group_association.aks
+  id = "/subscriptions/d9b2a1cf-f99b-4f9e-a6cf-c79a078406bf/resourceGroups/Devops-Test/providers/Microsoft.Network/virtualNetworks/vnet-devops-eastus/subnets/subnet-aks-devops-eastus"
+}
+
+import {
+  to = azurerm_subnet_network_security_group_association.appgw
+  id = "/subscriptions/d9b2a1cf-f99b-4f9e-a6cf-c79a078406bf/resourceGroups/Devops-Test/providers/Microsoft.Network/virtualNetworks/vnet-devops-eastus/subnets/subnet-appgw-devops-eastus"
+}
+
+import {
+  to = azurerm_kubernetes_cluster.main
+  id = "/subscriptions/d9b2a1cf-f99b-4f9e-a6cf-c79a078406bf/resourcegroups/Devops-Test/providers/Microsoft.ContainerService/managedClusters/aks-devops-eastus"
+}
+
 # Data sources for existing resources
 data "azurerm_resource_group" "main" {
   name = var.resource_group_name

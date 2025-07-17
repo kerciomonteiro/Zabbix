@@ -51,7 +51,7 @@ variable "create_role_assignments" {
 variable "kubernetes_version" {
   description = "Version of Kubernetes to use for the AKS cluster"
   type        = string
-  default     = "1.31.2"
+  default     = "1.32"
 }
 
 variable "aks_system_node_count" {

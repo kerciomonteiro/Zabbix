@@ -170,7 +170,7 @@ jobs:
         environment_name   = "$ENV_NAME"
         
         # AKS Configuration
-        kubernetes_version = "1.29.9"
+        kubernetes_version = "1.32"
         
         # Node Pool Configuration
         aks_system_node_count = 2
