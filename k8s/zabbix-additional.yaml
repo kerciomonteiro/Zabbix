@@ -97,7 +97,7 @@ spec:
         - name: DB_SERVER_HOST
           value: "zabbix-mysql"
         - name: MYSQL_DATABASE
-          value: "zabbix_proxy"
+          value: "zabbix"
         - name: MYSQL_USER
           value: "zabbix"
         - name: MYSQL_PASSWORD
