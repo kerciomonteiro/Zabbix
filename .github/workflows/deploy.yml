@@ -137,24 +137,39 @@ jobs:
       run: |
         echo "🚀 Deploying infrastructure using Azure CLI (AZD fallback)..."
         
-        # Generate unique resource names
-        RESOURCE_TOKEN=$(echo $RANDOM | md5sum | head -c 8)
+        # Generate deployment name
         DEPLOYMENT_NAME="zabbix-deployment-${{ github.run_number }}"
         
-        # Deploy Bicep template
+        # Deploy Bicep template with error handling
+        echo "🏗️ Deploying Bicep template..."
         DEPLOYMENT_OUTPUT=$(az deployment group create \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
           --template-file infra/main.bicep \
           --parameters environmentName="zabbix-aks-${{ github.run_number }}" \
                        location="${{ env.AZURE_LOCATION }}" \
                        principalId="$(az ad signed-in-user show --query id -o tsv)" \
-                       resourceToken="$RESOURCE_TOKEN" \
           --name "$DEPLOYMENT_NAME" \
           --output json)
         
-        # Extract outputs
-        AKS_CLUSTER_NAME=$(echo $DEPLOYMENT_OUTPUT | jq -r '.properties.outputs.aksClusterName.value')
-        CONTAINER_REGISTRY_ENDPOINT=$(echo $DEPLOYMENT_OUTPUT | jq -r '.properties.outputs.containerRegistryEndpoint.value')
+        if [ $? -ne 0 ]; then
+          echo "❌ Bicep deployment failed"
+          exit 1
+        fi
+        
+        # Extract outputs with validation
+        echo "📋 Extracting deployment outputs..."
+        AKS_CLUSTER_NAME=$(echo "$DEPLOYMENT_OUTPUT" | jq -r '.properties.outputs.AKS_CLUSTER_NAME.value // empty')
+        CONTAINER_REGISTRY_ENDPOINT=$(echo "$DEPLOYMENT_OUTPUT" | jq -r '.properties.outputs.CONTAINER_REGISTRY_ENDPOINT.value // empty')
+        
+        if [ -z "$AKS_CLUSTER_NAME" ] || [ "$AKS_CLUSTER_NAME" = "null" ]; then
+          echo "❌ Failed to get AKS cluster name from deployment outputs"
+          echo "Raw deployment output:"
+          echo "$DEPLOYMENT_OUTPUT" | jq '.'
+          echo ""
+          echo "Available outputs:"
+          echo "$DEPLOYMENT_OUTPUT" | jq '.properties.outputs // {}'
+          exit 1
+        fi
         
         # Set outputs
         echo "AKS_CLUSTER_NAME=$AKS_CLUSTER_NAME" >> $GITHUB_OUTPUT
@@ -175,22 +190,40 @@ jobs:
           echo "AKS_CLUSTER_NAME=${{ steps.deploy-infra-azd.outputs.AKS_CLUSTER_NAME }}" >> $GITHUB_OUTPUT
           echo "AZURE_RESOURCE_GROUP=${{ steps.deploy-infra-azd.outputs.AZURE_RESOURCE_GROUP }}" >> $GITHUB_OUTPUT
           echo "CONTAINER_REGISTRY_ENDPOINT=${{ steps.deploy-infra-azd.outputs.CONTAINER_REGISTRY_ENDPOINT }}" >> $GITHUB_OUTPUT
+          echo "DEPLOYMENT_SUCCESS=true" >> $GITHUB_OUTPUT
           echo "Used AZD for deployment" >> $GITHUB_STEP_SUMMARY
-        else
+        elif [ "${{ steps.deploy-infra-cli.outputs.AKS_CLUSTER_NAME }}" != "" ] && [ "${{ steps.deploy-infra-cli.outputs.AKS_CLUSTER_NAME }}" != "null" ]; then
           echo "AKS_CLUSTER_NAME=${{ steps.deploy-infra-cli.outputs.AKS_CLUSTER_NAME }}" >> $GITHUB_OUTPUT
           echo "AZURE_RESOURCE_GROUP=${{ steps.deploy-infra-cli.outputs.AZURE_RESOURCE_GROUP }}" >> $GITHUB_OUTPUT
           echo "CONTAINER_REGISTRY_ENDPOINT=${{ steps.deploy-infra-cli.outputs.CONTAINER_REGISTRY_ENDPOINT }}" >> $GITHUB_OUTPUT
+          echo "DEPLOYMENT_SUCCESS=true" >> $GITHUB_OUTPUT
           echo "Used Azure CLI for deployment (AZD fallback)" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ Both AZD and Azure CLI deployments failed or returned empty cluster name" >> $GITHUB_STEP_SUMMARY
+          echo "DEPLOYMENT_SUCCESS=false" >> $GITHUB_OUTPUT
+          exit 1
         fi
+        
+        # Display final results
+        echo "Final deployment outputs:"
+        echo "  AKS Cluster: $([ '${{ steps.deploy-infra-azd.outputs.AKS_CLUSTER_NAME }}' != '' ] && echo '${{ steps.deploy-infra-azd.outputs.AKS_CLUSTER_NAME }}' || echo '${{ steps.deploy-infra-cli.outputs.AKS_CLUSTER_NAME }}')"
+        echo "  Resource Group: $([ '${{ steps.deploy-infra-azd.outputs.AZURE_RESOURCE_GROUP }}' != '' ] && echo '${{ steps.deploy-infra-azd.outputs.AZURE_RESOURCE_GROUP }}' || echo '${{ steps.deploy-infra-cli.outputs.AZURE_RESOURCE_GROUP }}')"
+        echo "  Container Registry: $([ '${{ steps.deploy-infra-azd.outputs.CONTAINER_REGISTRY_ENDPOINT }}' != '' ] && echo '${{ steps.deploy-infra-azd.outputs.CONTAINER_REGISTRY_ENDPOINT }}' || echo '${{ steps.deploy-infra-cli.outputs.CONTAINER_REGISTRY_ENDPOINT }}')"
 
     - name: Get AKS credentials
+      if: steps.deploy-infra.outputs.DEPLOYMENT_SUCCESS == 'true'
       run: |
+        echo "🔑 Getting AKS credentials..."
+        echo "Cluster: ${{ steps.deploy-infra.outputs.AKS_CLUSTER_NAME }}"
+        echo "Resource Group: ${{ steps.deploy-infra.outputs.AZURE_RESOURCE_GROUP }}"
+        
         az aks get-credentials \
-          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --resource-group ${{ steps.deploy-infra.outputs.AZURE_RESOURCE_GROUP }} \
           --name ${{ steps.deploy-infra.outputs.AKS_CLUSTER_NAME }} \
           --overwrite-existing
 
     - name: Verify AKS connection
+      if: steps.deploy-infra.outputs.DEPLOYMENT_SUCCESS == 'true'
       run: |
         kubectl cluster-info
         kubectl get nodes

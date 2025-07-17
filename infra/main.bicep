@@ -536,6 +536,7 @@ output AZURE_TENANT_ID string = tenant().tenantId
 output AZURE_SUBSCRIPTION_ID string = subscription().subscriptionId
 output AZURE_RESOURCE_GROUP string = resourceGroup().name
 
+// AKS Cluster Information
 output AKS_CLUSTER_NAME string = aksCluster.name
 output AKS_CLUSTER_ID string = aksCluster.id
 output AKS_CLUSTER_FQDN string = aksCluster.properties.fqdn
