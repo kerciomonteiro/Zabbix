@@ -304,6 +304,15 @@ jobs:
         
         # Attempt deployment with retry logic
         if ! deploy_with_retry; then
+          # Check if this was due to content consumed error (emergency ARM should handle this)
+          if [ "${BICEP_FAILED_CONTENT_ERROR:-}" = "true" ]; then
+            echo "⚡ Content consumed error detected - skipping final diagnostics"
+            echo "🔄 Emergency ARM template deployment will handle this..."
+            echo "DEPLOYMENT_SUCCESS=false" >> $GITHUB_OUTPUT
+            echo "DEPLOYMENT_METHOD=failed-content-consumed" >> $GITHUB_OUTPUT
+            exit 0  # Exit gracefully to allow emergency ARM deployment
+          fi
+          
           echo ""
           echo "❌ All deployment attempts failed. Running final diagnostics..."
           
@@ -436,7 +445,7 @@ jobs:
 
     - name: Provision Infrastructure with PowerShell (Final Fallback)
       id: deploy-infra-pwsh
-      if: steps.deploy-infra-azd.outputs.DEPLOYMENT_SUCCESS != 'true' && steps.deploy-infra-cli.outputs.DEPLOYMENT_SUCCESS != 'true'
+      if: steps.deploy-infra-azd.outputs.DEPLOYMENT_SUCCESS != 'true' && steps.deploy-infra-cli.outputs.DEPLOYMENT_SUCCESS != 'true' && steps.deploy-infra-arm-emergency.outputs.DEPLOYMENT_SUCCESS != 'true'
       shell: pwsh
       run: |
         Write-Host "🚀 Attempting deployment with Azure PowerShell (final fallback)..." -ForegroundColor Cyan
@@ -488,7 +497,7 @@ jobs:
 
     - name: Provision Infrastructure with ARM Template (Alternative Fallback)
       id: deploy-infra-arm
-      if: steps.deploy-infra-azd.outputs.DEPLOYMENT_SUCCESS != 'true' && steps.deploy-infra-cli.outputs.DEPLOYMENT_SUCCESS != 'true'
+      if: steps.deploy-infra-azd.outputs.DEPLOYMENT_SUCCESS != 'true' && steps.deploy-infra-cli.outputs.DEPLOYMENT_SUCCESS != 'true' && steps.deploy-infra-arm-emergency.outputs.DEPLOYMENT_SUCCESS != 'true'
       run: |
         echo "🚀 Attempting deployment with ARM template (alternative to Bicep)..."
         
