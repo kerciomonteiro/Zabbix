@@ -36,10 +36,46 @@ jobs:
         az account set --subscription ${{ env.AZURE_SUBSCRIPTION_ID }}
         az account show
 
-    - name: Install AZD
-      uses: Azure/setup-azd@v1.0.0
+    - name: Install AZD (with fallback)
+      run: |
+        echo "🔧 Installing Azure Developer CLI..."
+        
+        # Try multiple installation methods
+        if ! command -v azd &> /dev/null; then
+          echo "Method 1: Trying direct download..."
+          if curl -fsSL https://aka.ms/install-azd.sh | bash; then
+            echo "✅ AZD installed via aka.ms script"
+          else
+            echo "❌ Method 1 failed, trying alternative..."
+            
+            # Alternative: Install via package manager
+            echo "Method 2: Installing via package manager..."
+            curl -sL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/microsoft.gpg > /dev/null
+            echo "deb [arch=amd64,arm64,armhf signed-by=/etc/apt/trusted.gpg.d/microsoft.gpg] https://packages.microsoft.com/repos/azure-cli/ $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/azure-cli.list
+            sudo apt-get update
+            sudo apt-get install -y azure-dev-cli || {
+              echo "❌ Package manager installation failed"
+              
+              # Final fallback: Use Azure CLI for deployment instead
+              echo "⚠️ AZD installation failed, will use Azure CLI for deployment"
+              echo "AZD_AVAILABLE=false" >> $GITHUB_ENV
+            }
+          fi
+        else
+          echo "✅ AZD already available"
+          echo "AZD_AVAILABLE=true" >> $GITHUB_ENV
+        fi
+        
+        # Verify installation
+        if command -v azd &> /dev/null; then
+          echo "AZD_AVAILABLE=true" >> $GITHUB_ENV
+          azd version
+        else
+          echo "AZD_AVAILABLE=false" >> $GITHUB_ENV
+        fi
 
     - name: Set AZD Environment Variables
+      if: env.AZD_AVAILABLE == 'true'
       run: |
         azd env set AZURE_ENV_NAME "zabbix-aks-${{ github.run_number }}"
         azd env set AZURE_LOCATION "${{ env.AZURE_LOCATION }}"
@@ -48,15 +84,70 @@ jobs:
         azd env set AZURE_PRINCIPAL_ID "$(az ad signed-in-user show --query id -o tsv)"
         azd env set AZURE_RESOURCE_TOKEN "$(echo $RANDOM | md5sum | head -c 8)"
 
-    - name: Provision Infrastructure
-      id: deploy-infra
+    - name: Provision Infrastructure with AZD
+      id: deploy-infra-azd
+      if: env.AZD_AVAILABLE == 'true'
       run: |
+        echo "🚀 Deploying infrastructure using Azure Developer CLI..."
         azd provision --no-prompt
         
         # Capture outputs
         echo "AKS_CLUSTER_NAME=$(azd env get-value AKS_CLUSTER_NAME)" >> $GITHUB_OUTPUT
         echo "AZURE_RESOURCE_GROUP=$(azd env get-value AZURE_RESOURCE_GROUP)" >> $GITHUB_OUTPUT
         echo "CONTAINER_REGISTRY_ENDPOINT=$(azd env get-value CONTAINER_REGISTRY_ENDPOINT)" >> $GITHUB_OUTPUT
+        echo "DEPLOYMENT_METHOD=azd" >> $GITHUB_OUTPUT
+
+    - name: Provision Infrastructure with Azure CLI (Fallback)
+      id: deploy-infra-cli
+      if: env.AZD_AVAILABLE != 'true'
+      run: |
+        echo "🚀 Deploying infrastructure using Azure CLI (AZD fallback)..."
+        
+        # Generate unique resource names
+        RESOURCE_TOKEN=$(echo $RANDOM | md5sum | head -c 8)
+        DEPLOYMENT_NAME="zabbix-deployment-${{ github.run_number }}"
+        
+        # Deploy Bicep template
+        DEPLOYMENT_OUTPUT=$(az deployment group create \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --template-file infra/main.bicep \
+          --parameters environmentName="zabbix-aks-${{ github.run_number }}" \
+                       location="${{ env.AZURE_LOCATION }}" \
+                       principalId="$(az ad signed-in-user show --query id -o tsv)" \
+                       resourceToken="$RESOURCE_TOKEN" \
+          --name "$DEPLOYMENT_NAME" \
+          --output json)
+        
+        # Extract outputs
+        AKS_CLUSTER_NAME=$(echo $DEPLOYMENT_OUTPUT | jq -r '.properties.outputs.aksClusterName.value')
+        CONTAINER_REGISTRY_ENDPOINT=$(echo $DEPLOYMENT_OUTPUT | jq -r '.properties.outputs.containerRegistryEndpoint.value')
+        
+        # Set outputs
+        echo "AKS_CLUSTER_NAME=$AKS_CLUSTER_NAME" >> $GITHUB_OUTPUT
+        echo "AZURE_RESOURCE_GROUP=${{ env.AZURE_RESOURCE_GROUP }}" >> $GITHUB_OUTPUT
+        echo "CONTAINER_REGISTRY_ENDPOINT=$CONTAINER_REGISTRY_ENDPOINT" >> $GITHUB_OUTPUT
+        echo "DEPLOYMENT_METHOD=cli" >> $GITHUB_OUTPUT
+        
+        echo "✅ Infrastructure deployed successfully!"
+        echo "   AKS Cluster: $AKS_CLUSTER_NAME"
+        echo "   Resource Group: ${{ env.AZURE_RESOURCE_GROUP }}"
+        echo "   Container Registry: $CONTAINER_REGISTRY_ENDPOINT"
+
+    - name: Set Infrastructure Outputs
+      id: deploy-infra
+      run: |
+        # Combine outputs from either deployment method
+        if [ "${{ steps.deploy-infra-azd.outputs.AKS_CLUSTER_NAME }}" != "" ]; then
+          echo "AKS_CLUSTER_NAME=${{ steps.deploy-infra-azd.outputs.AKS_CLUSTER_NAME }}" >> $GITHUB_OUTPUT
+          echo "AZURE_RESOURCE_GROUP=${{ steps.deploy-infra-azd.outputs.AZURE_RESOURCE_GROUP }}" >> $GITHUB_OUTPUT
+          echo "CONTAINER_REGISTRY_ENDPOINT=${{ steps.deploy-infra-azd.outputs.CONTAINER_REGISTRY_ENDPOINT }}" >> $GITHUB_OUTPUT
+          echo "Used AZD for deployment" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "AKS_CLUSTER_NAME=${{ steps.deploy-infra-cli.outputs.AKS_CLUSTER_NAME }}" >> $GITHUB_OUTPUT
+          echo "AZURE_RESOURCE_GROUP=${{ steps.deploy-infra-cli.outputs.AZURE_RESOURCE_GROUP }}" >> $GITHUB_OUTPUT
+          echo "CONTAINER_REGISTRY_ENDPOINT=${{ steps.deploy-infra-cli.outputs.CONTAINER_REGISTRY_ENDPOINT }}" >> $GITHUB_OUTPUT
+          echo "Used Azure CLI for deployment (AZD fallback)" >> $GITHUB_STEP_SUMMARY
+        fi
 
     - name: Get AKS credentials
       run: |

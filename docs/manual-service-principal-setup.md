@@ -136,3 +136,82 @@ You won't need the `AZURE_CLIENT_SECRET` in this case.
 After setting up the service principal and GitHub secrets, you can test the connection by running the GitHub Actions workflow or by manually triggering it from the Actions tab.
 
 The workflow will automatically deploy your AKS infrastructure and Zabbix application.
+
+## Troubleshooting
+
+### Error: "No subscriptions found"
+
+If you get this error during GitHub Actions deployment, it means the service principal exists but lacks proper permissions.
+
+**Solution 1: Fix Role Assignment at Subscription Level**
+1. Go to Azure Portal → Subscriptions
+2. Select subscription `On-Prem-Dlv-DevOps` (d9b2a1cf-f99b-4f9e-a6cf-c79a078406bf)
+3. Click "Access control (IAM)"
+4. Click "Add" → "Add role assignment"
+5. Select "Contributor" role → Next
+6. Select "User, group, or service principal"
+7. Search for "github-actions-zabbix-deployment"
+8. Select your service principal → Next → Review + assign
+
+**Solution 2: Resource Group Level Access (Alternative)**
+1. Go to Azure Portal → Resource groups
+2. Select "Devops-Test" resource group
+3. Follow steps 3-8 from Solution 1
+
+**Solution 3: Admin Request Template**
+Send this to your Azure administrator:
+
+```
+Subject: Service Principal Role Assignment Request
+
+Hi [Admin Name],
+
+I need help assigning permissions to a service principal for automated deployment.
+
+Details:
+- Service Principal Name: github-actions-zabbix-deployment
+- Application ID: [Your App ID from Azure Portal]
+- Required Role: Contributor
+- Scope: Subscription "On-Prem-Dlv-DevOps" (d9b2a1cf-f99b-4f9e-a6cf-c79a078406bf)
+- Alternative Scope: Resource Group "Devops-Test"
+- Purpose: GitHub Actions deployment for Zabbix monitoring infrastructure
+
+Please assign the Contributor role to this service principal at either the subscription or resource group level.
+
+Thank you!
+```
+
+### Error: "Invalid authentication type"
+
+This usually means the AZURE_CREDENTIALS JSON format is incorrect. Ensure it follows this exact format:
+
+```json
+{
+  "clientId": "your-application-client-id",
+  "clientSecret": "your-client-secret-value", 
+  "subscriptionId": "d9b2a1cf-f99b-4f9e-a6cf-c79a078406bf",
+  "tenantId": "your-tenant-id"
+}
+```
+
+Make sure:
+- No extra spaces or line breaks
+- All IDs are complete GUIDs
+- Client secret is the actual secret value, not the secret ID
+- All fields are enclosed in double quotes
+
+### Error: "getaddrinfo ENOTFOUND azdrelease.azureedge.net"
+
+This error occurs when GitHub Actions can't download the Azure Developer CLI due to network connectivity issues.
+
+**Solution**: The workflow now includes automatic fallback methods:
+
+1. **First**: Tries the official AZD installation via aka.ms
+2. **Second**: Tries package manager installation  
+3. **Third**: Falls back to Azure CLI direct Bicep deployment
+
+If you continue to see this error, the workflow will automatically use Azure CLI for deployment instead of AZD. This provides the same functionality but doesn't require the AZD tool.
+
+**Manual workaround** (if needed):
+- Re-run the workflow (the network issue is often temporary)
+- The fallback Azure CLI method should work even if AZD installation fails
