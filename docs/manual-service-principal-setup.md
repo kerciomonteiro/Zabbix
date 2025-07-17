@@ -354,3 +354,54 @@ az deployment group create \
 ```
 
 **Note**: This doesn't affect functionality since the Bicep template gracefully handles missing `principalId` by skipping user-specific role assignments that aren't needed for automated deployments.
+
+### Error: "The content for this response was already consumed"
+
+This is a generic Azure CLI error that often indicates a problem with the Bicep template deployment or Azure resource provisioning.
+
+**Example Error:**
+```
+ERROR: The content for this response was already consumed
+Error: Process completed with exit code 1.
+```
+
+**Common Causes**:
+1. **Template Syntax Issues**: Problems with Bicep template syntax or resource definitions
+2. **Resource Naming Conflicts**: Attempting to create resources with names that already exist
+3. **Permission Issues**: Service principal lacks sufficient permissions for specific resource types
+4. **Resource Provider Issues**: Azure resource providers not properly registered
+5. **Quota Limitations**: Subscription has reached resource quotas
+
+**Troubleshooting Steps**:
+
+1. **Check Template Validation**: The workflow now includes template validation for better error reporting:
+   ```bash
+   az deployment group validate \
+     --resource-group Devops-Test \
+     --template-file infra/main.bicep \
+     --parameters environmentName="..." location="eastus"
+   ```
+
+2. **Review Verbose Output**: The workflow captures detailed error information for analysis.
+
+3. **Check Resource Quotas**: Verify your subscription has sufficient quota for:
+   - AKS clusters
+   - Virtual networks
+   - Container registries
+   - Application gateways
+
+4. **Verify Resource Names**: Ensure resource names are unique and follow Azure naming conventions.
+
+5. **Check Resource Providers**: Ensure required providers are registered:
+   ```bash
+   az provider register --namespace Microsoft.ContainerService
+   az provider register --namespace Microsoft.Network
+   az provider register --namespace Microsoft.ContainerRegistry
+   ```
+
+**Resolution**: The workflow has been enhanced with:
+- Verbose error output and validation
+- Improved Bicep template with better error handling
+- Automatic resource name uniqueness using resource tokens
+
+If this error persists, check the detailed error output in the GitHub Actions logs for specific guidance.
