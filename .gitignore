@@ -3,6 +3,13 @@
 .env
 *.env
 
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+# Note: .terraform.lock.hcl should be committed to ensure reproducible builds
+
 # Build outputs
 bin/
 obj/

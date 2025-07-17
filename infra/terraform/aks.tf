@@ -61,11 +61,7 @@ resource "azurerm_kubernetes_cluster" "main" {
   }
 
   # Azure Policy Integration
-  dynamic "azure_policy_enabled" {
-    for_each = var.enable_azure_policy ? [1] : []
-    content {
-    }
-  }
+  azure_policy_enabled = var.enable_azure_policy
 
   # Ingress Application Gateway Integration
   ingress_application_gateway {
@@ -109,10 +105,9 @@ resource "azurerm_kubernetes_cluster_node_pool" "user" {
   vnet_subnet_id        = azurerm_subnet.aks.id
   
   # Auto-scaling configuration
-  auto_scaling_enabled = var.enable_auto_scaling
-  node_count          = var.enable_auto_scaling ? null : var.aks_user_node_count
-  min_count           = var.enable_auto_scaling ? var.aks_user_node_min_count : null
-  max_count           = var.enable_auto_scaling ? var.aks_user_node_max_count : null
+  node_count = var.enable_auto_scaling ? null : var.aks_user_node_count
+  min_count  = var.enable_auto_scaling ? var.aks_user_node_min_count : null
+  max_count  = var.enable_auto_scaling ? var.aks_user_node_max_count : null
   
   # High availability across zones
   zones = ["1", "2", "3"]
