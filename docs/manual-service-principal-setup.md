@@ -229,3 +229,30 @@ If you see errors about invalid environment names or AZD hanging on environment 
 **Region Setting**: All deployments are configured for **East US (eastus)** region.
 
 If AZD continues to fail, the workflow will automatically use the Azure CLI fallback method.
+
+### Error: "WARNING: You must be logged into Azure perform this action" (AZD)
+
+This error occurs when Azure Developer CLI (AZD) cannot authenticate in the GitHub Actions environment, even though Azure CLI is already authenticated.
+
+**Root Cause**: AZD and Azure CLI use separate authentication contexts in GitHub Actions. AZD tries to perform interactive browser-based authentication which is not possible in a CI/CD environment.
+
+**Solution**: The workflow automatically handles this by:
+
+1. **Detection**: Monitors for AZD authentication issues
+2. **Automatic Fallback**: Switches to Azure CLI direct Bicep deployment
+3. **Same Result**: Provides identical infrastructure deployment without AZD
+
+**Why This Happens**:
+- AZD requires separate authentication from Azure CLI
+- GitHub Actions runners can't perform interactive browser authentication
+- Service principal authentication works differently between AZD and Azure CLI
+
+**Current Behavior**:
+- Workflow attempts AZD installation and configuration
+- If AZD authentication fails, automatically uses Azure CLI
+- Final result is identical infrastructure deployment
+- No manual intervention required
+
+**Manual Resolution** (if needed):
+1. Re-run the workflow (it will use Azure CLI fallback)
+2. The fallback method is actually more reliable for CI/CD environments
