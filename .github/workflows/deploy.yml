@@ -153,12 +153,12 @@ jobs:
         # Navigate to Terraform directory
         cd infra/terraform
         
-        # Generate environment name with DevOps naming convention
+        # Generate consistent environment name (without run number to avoid resource conflicts)
         ENV_SUFFIX="${{ github.event.inputs.environment_suffix }}"
         if [ -n "$ENV_SUFFIX" ]; then
-          ENV_NAME="zabbix-devops-${{ env.AZURE_LOCATION }}-${{ github.run_number }}-$ENV_SUFFIX"
+          ENV_NAME="zabbix-devops-${{ env.AZURE_LOCATION }}-$ENV_SUFFIX"
         else
-          ENV_NAME="zabbix-devops-${{ env.AZURE_LOCATION }}-${{ github.run_number }}"
+          ENV_NAME="zabbix-devops-${{ env.AZURE_LOCATION }}"
         fi
         echo "Environment name: $ENV_NAME"
         echo "This will create resources with naming pattern: resourcename-devops-${{ env.AZURE_LOCATION }}"
@@ -208,6 +208,37 @@ jobs:
         # Initialize Terraform
         echo "📦 Initializing Terraform..."
         terraform init
+        
+        # Import existing resources if they exist (ignore errors for non-existent resources)
+        echo "📦 Attempting to import existing resources..."
+        set +e  # Don't exit on import errors
+        
+        # Import managed identity
+        terraform import azurerm_user_assigned_identity.aks "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-devops-${{ env.AZURE_LOCATION }}" 2>/dev/null || echo "⚠️ Managed identity doesn't exist or already imported"
+        
+        # Import log analytics workspace
+        terraform import 'azurerm_log_analytics_workspace.main[0]' "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.OperationalInsights/workspaces/law-devops-${{ env.AZURE_LOCATION }}" 2>/dev/null || echo "⚠️ Log Analytics workspace doesn't exist or already imported"
+        
+        # Import network security groups
+        terraform import azurerm_network_security_group.aks "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.Network/networkSecurityGroups/nsg-aks-devops-${{ env.AZURE_LOCATION }}" 2>/dev/null || echo "⚠️ AKS NSG doesn't exist or already imported"
+        terraform import azurerm_network_security_group.appgw "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.Network/networkSecurityGroups/nsg-appgw-devops-${{ env.AZURE_LOCATION }}" 2>/dev/null || echo "⚠️ App Gateway NSG doesn't exist or already imported"
+        
+        # Import virtual network
+        terraform import azurerm_virtual_network.main "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.Network/virtualNetworks/vnet-devops-${{ env.AZURE_LOCATION }}" 2>/dev/null || echo "⚠️ VNet doesn't exist or already imported"
+        
+        # Import subnets
+        terraform import azurerm_subnet.aks "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.Network/virtualNetworks/vnet-devops-${{ env.AZURE_LOCATION }}/subnets/subnet-aks-devops-${{ env.AZURE_LOCATION }}" 2>/dev/null || echo "⚠️ AKS subnet doesn't exist or already imported"
+        terraform import azurerm_subnet.appgw "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.Network/virtualNetworks/vnet-devops-${{ env.AZURE_LOCATION }}/subnets/subnet-appgw-devops-${{ env.AZURE_LOCATION }}" 2>/dev/null || echo "⚠️ App Gateway subnet doesn't exist or already imported"
+        
+        # Import public IP
+        terraform import azurerm_public_ip.appgw "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.Network/publicIPAddresses/pip-appgw-devops-${{ env.AZURE_LOCATION }}" 2>/dev/null || echo "⚠️ Public IP doesn't exist or already imported"
+        
+        # Import container registry (with calculated name)
+        ACR_NAME="acrzabbixdevops${{ env.AZURE_LOCATION }}"
+        terraform import azurerm_container_registry.main "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.ContainerRegistry/registries/$ACR_NAME" 2>/dev/null || echo "⚠️ Container registry doesn't exist or already imported"
+        
+        set -e  # Re-enable exit on error
+        echo "✅ Import attempts completed"
         
         # Validate configuration
         echo "🔍 Validating Terraform configuration..."
@@ -301,12 +332,12 @@ jobs:
         ARM_DEPLOYMENT_NAME="zabbix-arm-deploy-${{ github.run_number }}-$TIMESTAMP"
         echo "ARM Deployment name: $ARM_DEPLOYMENT_NAME"
         
-        # Generate environment name with DevOps naming convention
+        # Generate environment name with DevOps naming convention (consistent with Terraform)
         ENV_SUFFIX="${{ github.event.inputs.environment_suffix }}"
         if [ -n "$ENV_SUFFIX" ]; then
-          DEPLOYMENT_ENV_NAME="zabbix-devops-${{ env.AZURE_LOCATION }}-${{ github.run_number }}-$ENV_SUFFIX"
+          DEPLOYMENT_ENV_NAME="zabbix-devops-${{ env.AZURE_LOCATION }}-$ENV_SUFFIX"
         else
-          DEPLOYMENT_ENV_NAME="zabbix-devops-${{ env.AZURE_LOCATION }}-${{ github.run_number }}"
+          DEPLOYMENT_ENV_NAME="zabbix-devops-${{ env.AZURE_LOCATION }}"
         fi
         
         echo "Deployment environment name: $DEPLOYMENT_ENV_NAME"
