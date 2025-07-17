@@ -1,4 +1,4 @@
-name: Deploy AKS Zabbix Infrastructure
+name: Deploy AKS Zabbix Infrastructure (Terraform & ARM)
 
 on:
   push:
@@ -17,6 +17,15 @@ on:
         - infrastructure-only
         - application-only
         - redeploy-clean
+      infrastructure_method:
+        description: 'Infrastructure deployment method'
+        required: true
+        default: 'terraform'
+        type: choice
+        options:
+        - terraform
+        - arm
+        - both
       force_powershell:
         description: 'Force PowerShell deployment (skip Azure CLI)'
         required: false
@@ -43,6 +52,7 @@ env:
   AZURE_LOCATION: 'eastus'
   AZURE_SUBSCRIPTION_ID: 'd9b2a1cf-f99b-4f9e-a6cf-c79a078406bf'
   DEPLOYMENT_TYPE: ${{ github.event.inputs.deployment_type || 'full' }}
+  INFRASTRUCTURE_METHOD: ${{ github.event.inputs.infrastructure_method || 'terraform' }}
   FORCE_POWERSHELL: ${{ github.event.inputs.force_powershell || 'false' }}
   RESET_DATABASE: ${{ github.event.inputs.reset_database || 'false' }}
   DEBUG_MODE: ${{ github.event.inputs.debug_mode || 'false' }}
@@ -67,6 +77,7 @@ jobs:
       run: |
         echo "=== Deployment Configuration ==="
         echo "Deployment Type: ${{ github.event.inputs.deployment_type || 'full' }}"
+        echo "Infrastructure Method: ${{ github.event.inputs.infrastructure_method || 'terraform' }}"
         echo "Force PowerShell: ${{ github.event.inputs.force_powershell || 'false' }}"
         echo "Reset Database: ${{ github.event.inputs.reset_database || 'false' }}"
         echo "Debug Mode: ${{ github.event.inputs.debug_mode || 'false' }}"
@@ -92,50 +103,57 @@ jobs:
         az account set --subscription ${{ env.AZURE_SUBSCRIPTION_ID }}
         az account show
 
-    - name: Install AZD (with fallback)
+    - name: Install Terraform
       run: |
-        echo "🔧 Installing Azure Developer CLI..."
+        echo "🔧 Installing Terraform..."
         
-        # Try multiple installation methods
-        if ! command -v azd &> /dev/null; then
-          echo "Method 1: Trying direct download..."
-          if curl -fsSL https://aka.ms/install-azd.sh | bash; then
-            echo "✅ AZD installed via aka.ms script"
-          else
-            echo "❌ Method 1 failed, trying alternative..."
-            
-            # Alternative: Install via package manager
-            echo "Method 2: Installing via package manager..."
-            curl -sL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/microsoft.gpg > /dev/null
-            echo "deb [arch=amd64,arm64,armhf signed-by=/etc/apt/trusted.gpg.d/microsoft.gpg] https://packages.microsoft.com/repos/azure-cli/ $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/azure-cli.list
-            sudo apt-get update
-            sudo apt-get install -y azure-dev-cli || {
-              echo "❌ Package manager installation failed"
-              
-              # Final fallback: Use Azure CLI for deployment instead
-              echo "⚠️ AZD installation failed, will use Azure CLI for deployment"
-              echo "AZD_AVAILABLE=false" >> $GITHUB_ENV
-            }
-          fi
-        else
-          echo "✅ AZD already available"
-          echo "AZD_AVAILABLE=true" >> $GITHUB_ENV
-        fi
+        # Download and install Terraform
+        TERRAFORM_VERSION="1.6.0"
+        curl -Lo terraform.zip "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip"
+        unzip terraform.zip
+        sudo mv terraform /usr/local/bin/
+        rm terraform.zip
         
         # Verify installation
-        if command -v azd &> /dev/null; then
-          echo "AZD_AVAILABLE=true" >> $GITHUB_ENV
-          azd version
-        else
-          echo "AZD_AVAILABLE=false" >> $GITHUB_ENV
-        fi
+        terraform version
+        echo "✅ Terraform installed successfully"
 
-    - name: Initialize and Configure AZD Environment
-      if: env.AZD_AVAILABLE == 'true'
+    - name: Validate Infrastructure Method Selection
       run: |
-        echo "🔧 Initializing AZD environment..."
+        echo "🔍 Validating infrastructure deployment method..."
+        echo "Selected method: ${{ env.INFRASTRUCTURE_METHOD }}"
         
-        # Initialize AZD environment with DevOps naming convention
+        case "${{ env.INFRASTRUCTURE_METHOD }}" in
+          "terraform")
+            echo "✅ Will use Terraform for infrastructure deployment"
+            echo "DEPLOY_TERRAFORM=true" >> $GITHUB_ENV
+            echo "DEPLOY_ARM=false" >> $GITHUB_ENV
+            ;;
+          "arm")
+            echo "✅ Will use ARM templates for infrastructure deployment"
+            echo "DEPLOY_TERRAFORM=false" >> $GITHUB_ENV
+            echo "DEPLOY_ARM=true" >> $GITHUB_ENV
+            ;;
+          "both")
+            echo "✅ Will try Terraform first, then ARM as fallback"
+            echo "DEPLOY_TERRAFORM=true" >> $GITHUB_ENV
+            echo "DEPLOY_ARM=true" >> $GITHUB_ENV
+            ;;
+          *)
+            echo "❌ Invalid infrastructure method: ${{ env.INFRASTRUCTURE_METHOD }}"
+            exit 1
+            ;;
+        esac
+
+    - name: Prepare Terraform Environment
+      if: env.DEPLOY_TERRAFORM == 'true'
+      run: |
+        echo "🔧 Preparing Terraform environment..."
+        
+        # Navigate to Terraform directory
+        cd infra/terraform
+        
+        # Generate environment name with DevOps naming convention
         ENV_SUFFIX="${{ github.event.inputs.environment_suffix }}"
         if [ -n "$ENV_SUFFIX" ]; then
           ENV_NAME="zabbix-devops-${{ env.AZURE_LOCATION }}-${{ github.run_number }}-$ENV_SUFFIX"
@@ -145,58 +163,98 @@ jobs:
         echo "Environment name: $ENV_NAME"
         echo "This will create resources with naming pattern: resourcename-devops-${{ env.AZURE_LOCATION }}"
         
-        # Initialize the environment non-interactively
-        azd env new "$ENV_NAME" --location "${{ env.AZURE_LOCATION }}" --subscription "${{ env.AZURE_SUBSCRIPTION_ID }}"
+        # Create terraform.tfvars file
+        cat > terraform.tfvars << EOF
+        resource_group_name = "${{ env.AZURE_RESOURCE_GROUP }}"
+        location           = "${{ env.AZURE_LOCATION }}"
+        environment_name   = "$ENV_NAME"
         
-        # Select the environment
-        azd env select "$ENV_NAME"
+        # AKS Configuration
+        kubernetes_version = "1.29.9"
         
-        # Set additional environment variables
-        azd env set AZURE_RESOURCE_GROUP "${{ env.AZURE_RESOURCE_GROUP }}"
-        # Skip AZURE_PRINCIPAL_ID for service principal authentication
-        # azd env set AZURE_PRINCIPAL_ID "$(az ad signed-in-user show --query id -o tsv)"
-        azd env set AZURE_RESOURCE_TOKEN "$(echo $RANDOM | md5sum | head -c 8)"
+        # Node Pool Configuration
+        aks_system_node_count = 2
+        aks_user_node_count   = 3
+        aks_user_node_min_count = 2
+        aks_user_node_max_count = 10
         
-        # Authenticate AZD using the service principal (inherit from Azure CLI)
-        echo "🔐 Configuring AZD authentication..."
+        # VM Sizes
+        aks_system_vm_size = "Standard_D2s_v3"
+        aks_user_vm_size   = "Standard_D4s_v3"
         
-        # Skip AZD authentication for now and rely on Azure CLI fallback
-        # AZD in GitHub Actions has issues with service principal authentication
-        echo "⚠️ AZD authentication skipped - using Azure CLI fallback for reliability"
-        echo "AZD_AUTH_FAILED=true" >> $GITHUB_ENV
+        # Feature Flags
+        enable_auto_scaling  = true
+        enable_azure_policy  = true
+        enable_log_analytics = true
         
-        echo "✅ AZD environment configured successfully"
+        # Monitoring
+        log_analytics_retention_days = 30
+        EOF
+        
+        echo "✅ Terraform environment prepared"
+        
+        # Store environment name for later steps
+        echo "TERRAFORM_ENV_NAME=$ENV_NAME" >> $GITHUB_ENV
 
-    - name: Provision Infrastructure with AZD
-      id: deploy-infra-azd
-      if: env.AZD_AVAILABLE == 'true' && env.AZD_AUTH_FAILED != 'true'
+    - name: Deploy Infrastructure with Terraform
+      id: deploy-infra-terraform
+      if: env.DEPLOY_TERRAFORM == 'true'
       continue-on-error: true
       run: |
-        echo "🚀 Deploying infrastructure using Azure Developer CLI..."
+        echo "🚀 Deploying infrastructure using Terraform..."
         
-        # Show current environment for debugging
-        azd env list
-        azd env get-values
+        cd infra/terraform
         
-        # Deploy with verbose output
-        if azd provision --no-prompt --debug; then
-          echo "✅ AZD deployment successful"
+        # Initialize Terraform
+        echo "📦 Initializing Terraform..."
+        terraform init
+        
+        # Validate configuration
+        echo "🔍 Validating Terraform configuration..."
+        if ! terraform validate; then
+          echo "❌ Terraform validation failed"
+          exit 1
+        fi
+        echo "✅ Terraform configuration is valid"
+        
+        # Plan deployment
+        echo "📋 Creating Terraform plan..."
+        if ! terraform plan -out=tfplan; then
+          echo "❌ Terraform plan failed"
+          exit 1
+        fi
+        echo "✅ Terraform plan created successfully"
+        
+        # Apply deployment
+        echo "🏗️ Applying Terraform configuration..."
+        if terraform apply -auto-approve tfplan; then
+          echo "✅ Terraform deployment successful"
           
           # Capture outputs
-          echo "AKS_CLUSTER_NAME=$(azd env get-value AKS_CLUSTER_NAME)" >> $GITHUB_OUTPUT
-          echo "AZURE_RESOURCE_GROUP=$(azd env get-value AZURE_RESOURCE_GROUP)" >> $GITHUB_OUTPUT
-          echo "CONTAINER_REGISTRY_ENDPOINT=$(azd env get-value CONTAINER_REGISTRY_ENDPOINT)" >> $GITHUB_OUTPUT
-          echo "DEPLOYMENT_METHOD=azd" >> $GITHUB_OUTPUT
+          echo "📋 Extracting Terraform outputs..."
+          AKS_CLUSTER_NAME=$(terraform output -raw AKS_CLUSTER_NAME)
+          AZURE_RESOURCE_GROUP=$(terraform output -raw AZURE_RESOURCE_GROUP)
+          CONTAINER_REGISTRY_ENDPOINT=$(terraform output -raw CONTAINER_REGISTRY_ENDPOINT)
+          
+          echo "AKS_CLUSTER_NAME=$AKS_CLUSTER_NAME" >> $GITHUB_OUTPUT
+          echo "AZURE_RESOURCE_GROUP=$AZURE_RESOURCE_GROUP" >> $GITHUB_OUTPUT
+          echo "CONTAINER_REGISTRY_ENDPOINT=$CONTAINER_REGISTRY_ENDPOINT" >> $GITHUB_OUTPUT
+          echo "DEPLOYMENT_METHOD=terraform" >> $GITHUB_OUTPUT
           echo "DEPLOYMENT_SUCCESS=true" >> $GITHUB_OUTPUT
+          
+          echo "✅ Infrastructure deployed successfully with Terraform!"
+          echo "   AKS Cluster: $AKS_CLUSTER_NAME"
+          echo "   Resource Group: $AZURE_RESOURCE_GROUP"
+          echo "   Container Registry: $CONTAINER_REGISTRY_ENDPOINT"
         else
-          echo "❌ AZD deployment failed, will fall back to Azure CLI"
+          echo "❌ Terraform deployment failed, will fall back to ARM templates"
           echo "DEPLOYMENT_SUCCESS=false" >> $GITHUB_OUTPUT
         fi
 
     - name: Pre-deployment Diagnostics
-      if: steps.deploy-infra-azd.outputs.DEPLOYMENT_SUCCESS != 'true'
+      if: steps.deploy-infra-terraform.outputs.DEPLOYMENT_SUCCESS != 'true' && env.DEPLOY_ARM == 'true'
       run: |
-        echo "🔍 Running pre-deployment diagnostics..."
+        echo "🔍 Running pre-deployment diagnostics for ARM template fallback..."
         
         # Check resource group access
         echo "Checking resource group access..."
@@ -217,429 +275,32 @@ jobs:
           fi
         done
         
-        # Check for naming conflicts with new DevOps naming convention
-        echo "Checking for potential resource naming conflicts..."
-        ENV_SUFFIX="${{ github.event.inputs.environment_suffix }}"
-        if [ -n "$ENV_SUFFIX" ]; then
-          ENV_NAME="zabbix-devops-${{ env.AZURE_LOCATION }}-${{ github.run_number }}-$ENV_SUFFIX"
-        else
-          ENV_NAME="zabbix-devops-${{ env.AZURE_LOCATION }}-${{ github.run_number }}"
-        fi
-        POTENTIAL_ACR_NAME="acr${ENV_NAME//-/}devops${{ env.AZURE_LOCATION }}"
-        
-        echo "Environment name: $ENV_NAME"
-        echo "Potential ACR name: $POTENTIAL_ACR_NAME"
-        echo "Resources will use naming pattern: resourcename-devops-${{ env.AZURE_LOCATION }}"
-        
-        # Check if ACR name is available
-        if az acr check-name --name "$POTENTIAL_ACR_NAME" --query nameAvailable -o tsv | grep -q "false"; then
-          echo "⚠️ ACR name $POTENTIAL_ACR_NAME may not be available"
-        else
-          echo "✅ ACR name appears to be available"
-        fi
+        echo "✅ Pre-deployment diagnostics completed"
 
-    - name: Validate Bicep Template
-      if: steps.deploy-infra-azd.outputs.DEPLOYMENT_SUCCESS != 'true'
+    - name: Validate Terraform Configuration (if using Terraform)
+      if: env.DEPLOY_TERRAFORM == 'true'
       run: |
-        echo "🔍 Validating Bicep template..."
+        echo "🔍 Validating Terraform configuration..."
+        cd infra/terraform
         
-        # First, validate the template syntax
-        echo "Checking template syntax..."
-        az bicep build --file infra/main.bicep --stdout > /dev/null || {
-          echo "❌ Bicep template has syntax errors"
+        # Validate syntax
+        if ! terraform validate; then
+          echo "❌ Terraform validation failed"
           exit 1
-        }
-        echo "✅ Template syntax is valid"
-        
-        # Run what-if analysis to see what would be deployed
-        echo "Running what-if analysis..."
-        DEPLOYMENT_NAME="zabbix-validation-${{ github.run_number }}"
-        
-        # Generate environment name with DevOps naming convention
-        ENV_SUFFIX="${{ github.event.inputs.environment_suffix }}"
-        if [ -n "$ENV_SUFFIX" ]; then
-          DEPLOYMENT_ENV_NAME="zabbix-devops-${{ env.AZURE_LOCATION }}-${{ github.run_number }}-$ENV_SUFFIX"
-        else
-          DEPLOYMENT_ENV_NAME="zabbix-devops-${{ env.AZURE_LOCATION }}-${{ github.run_number }}"
         fi
-        echo "Deployment environment name: $DEPLOYMENT_ENV_NAME"
-        echo "Resources will be named with pattern: resourcename-devops-${{ env.AZURE_LOCATION }}"
-        
-        # Use what-if to validate without deploying
-        az deployment group what-if \
-          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-          --template-file infra/main.bicep \
-          --parameters environmentName="$DEPLOYMENT_ENV_NAME" \
-                       location="${{ env.AZURE_LOCATION }}" \
-          --name "$DEPLOYMENT_NAME" || {
-          echo "❌ What-if analysis failed"
-          exit 1
-        }
-        echo "✅ What-if analysis completed successfully"
+        echo "✅ Terraform configuration is valid"
 
-    - name: Provision Infrastructure with Azure CLI (Fallback)
-      id: deploy-infra-cli
-      if: steps.deploy-infra-azd.outputs.DEPLOYMENT_SUCCESS != 'true'
-      run: |
-        echo "🚀 Deploying infrastructure using Azure CLI (AZD fallback)..."
-        
-        # Generate environment name with DevOps naming convention
-        ENV_SUFFIX="${{ github.event.inputs.environment_suffix }}"
-        if [ -n "$ENV_SUFFIX" ]; then
-          DEPLOYMENT_ENV_NAME="zabbix-devops-${{ env.AZURE_LOCATION }}-${{ github.run_number }}-$ENV_SUFFIX"
-        else
-          DEPLOYMENT_ENV_NAME="zabbix-devops-${{ env.AZURE_LOCATION }}-${{ github.run_number }}"
-        fi
-        echo "Deployment environment name: $DEPLOYMENT_ENV_NAME"
-        echo "Resources will be named with pattern: resourcename-devops-${{ env.AZURE_LOCATION }}"
-        
-        # Generate deployment name with timestamp to avoid conflicts
-        TIMESTAMP=$(date +%s)
-        DEPLOYMENT_NAME="zabbix-deploy-${{ github.run_number }}-$TIMESTAMP"
-        echo "Deployment name: $DEPLOYMENT_NAME"
-        
-        # Deploy Bicep template with improved error handling and retry logic
-        echo "🏗️ Deploying Bicep template..."
-        echo "ℹ️ Deploying with service principal authentication (no user principal ID needed)"
-        
-        # Function to attempt deployment with retry logic
-        deploy_with_retry() {
-          local attempt=1
-          local max_attempts=3
-          local delay=30
-          
-          while [ $attempt -le $max_attempts ]; do
-            echo "🔄 Deployment attempt $attempt of $max_attempts..."
-            
-            # Clear only specific cache files to avoid "content consumed" errors
-            # But preserve authentication tokens
-            rm -rf ~/.azure/commandIndex.json ~/.azure/telemetry.txt 2>/dev/null || true
-            
-            # Verify authentication without clearing auth tokens
-            echo "🔐 Verifying Azure authentication..."
-            if ! az account show --output none 2>/dev/null; then
-              echo "❌ Authentication lost, re-authenticating with service principal..."
-              # Re-authenticate using the stored credentials
-              CLIENT_ID=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r .clientId)
-              CLIENT_SECRET=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r .clientSecret)
-              TENANT_ID=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r .tenantId)
-              
-              az login \
-                --service-principal \
-                --username "$CLIENT_ID" \
-                --password "$CLIENT_SECRET" \
-                --tenant "$TENANT_ID" > /dev/null
-              
-              # Set the subscription
-              az account set --subscription "${{ env.AZURE_SUBSCRIPTION_ID }}"
-              echo "✅ Re-authentication successful"
-            else
-              echo "✅ Authentication verified"
-            fi
-            
-            # Set deployment timeout and try deployment
-            export AZURE_HTTP_USER_AGENT="GitHub-Actions-Zabbix-Deploy"
-            
-            set +e  # Don't exit on error
-            DEPLOYMENT_OUTPUT=$(timeout 1800 az deployment group create \
-              --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-              --template-file infra/main.bicep \
-              --parameters environmentName="$DEPLOYMENT_ENV_NAME" \
-                           location="${{ env.AZURE_LOCATION }}" \
-              --name "$DEPLOYMENT_NAME" \
-              --mode Incremental \
-              --output json \
-              --only-show-errors 2>&1)
-            DEPLOYMENT_EXIT_CODE=$?
-            set -e  # Re-enable exit on error
-            
-            if [ $DEPLOYMENT_EXIT_CODE -eq 0 ]; then
-              echo "✅ Deployment successful on attempt $attempt"
-              echo "$DEPLOYMENT_OUTPUT"
-              return 0
-            else
-              echo "❌ Deployment attempt $attempt failed with exit code $DEPLOYMENT_EXIT_CODE"
-              echo "Error output:"
-              echo "$DEPLOYMENT_OUTPUT"
-              
-              # Check for specific "content consumed" error and set flag for immediate ARM fallback
-              if echo "$DEPLOYMENT_OUTPUT" | grep -i "content.*already.*consumed"; then
-                echo "🚨 Detected 'content already consumed' error - this is a known Azure CLI session issue"
-                echo "⚡ Setting flag for immediate ARM template fallback..."
-                # Set environment variable in outer scope
-                export BICEP_FAILED_CONTENT_ERROR=true
-                echo "BICEP_FAILED_CONTENT_ERROR=true" >> $GITHUB_ENV
-                echo "❌ Bicep deployment failed due to Azure CLI session issue"
-                return 1
-              fi
-              
-              # Check if it's a retryable error (other than content consumed)
-              if echo "$DEPLOYMENT_OUTPUT" | grep -i "timeout\|network\|connection\|login"; then
-                if [ $attempt -lt $max_attempts ]; then
-                  echo "⏳ Retryable error detected. Waiting ${delay}s before retry..."
-                  sleep $delay
-                  delay=$((delay * 2))  # Exponential backoff
-                  attempt=$((attempt + 1))
-                  
-                  # Try with a new deployment name to avoid conflicts
-                  DEPLOYMENT_NAME="zabbix-deploy-${{ github.run_number }}-$(date +%s)"
-                  echo "Using new deployment name: $DEPLOYMENT_NAME"
-                  continue
-                fi
-              fi
-              
-              echo "❌ Non-retryable error or max attempts reached"
-              return $DEPLOYMENT_EXIT_CODE
-            fi
-          done
-        }
-        
-        # Attempt deployment with retry logic
-        if ! deploy_with_retry; then
-          # Check if this was due to content consumed error (emergency ARM should handle this)
-          if [ "${BICEP_FAILED_CONTENT_ERROR:-}" = "true" ]; then
-            echo "⚡ Content consumed error detected - skipping final diagnostics"
-            echo "🔄 Emergency ARM template deployment will handle this..."
-            echo "DEPLOYMENT_SUCCESS=false" >> $GITHUB_OUTPUT
-            echo "DEPLOYMENT_METHOD=failed-content-consumed" >> $GITHUB_OUTPUT
-            exit 0  # Exit gracefully to allow emergency ARM deployment
-          fi
-          
-          echo ""
-          echo "❌ All deployment attempts failed. Running final diagnostics..."
-          
-          # Try validation as a last resort to get better error info
-          echo "Running template validation for error details..."
-          az deployment group validate \
-            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-            --template-file infra/main.bicep \
-            --parameters environmentName="$DEPLOYMENT_ENV_NAME" \
-                         location="${{ env.AZURE_LOCATION }}" \
-            --output json 2>&1 | jq '.' || echo "Validation also failed"
-          
-          exit 1
-        fi
-        
-        # Extract outputs with validation
-        echo "📋 Extracting deployment outputs..."
-        if ! echo "$DEPLOYMENT_OUTPUT" | jq . > /dev/null 2>&1; then
-          echo "❌ Deployment output is not valid JSON"
-          echo "Raw output:"
-          echo "$DEPLOYMENT_OUTPUT"
-          exit 1
-        fi
-        
-        AKS_CLUSTER_NAME=$(echo "$DEPLOYMENT_OUTPUT" | jq -r '.properties.outputs.AKS_CLUSTER_NAME.value // empty')
-        CONTAINER_REGISTRY_ENDPOINT=$(echo "$DEPLOYMENT_OUTPUT" | jq -r '.properties.outputs.CONTAINER_REGISTRY_ENDPOINT.value // empty')
-        
-        if [ -z "$AKS_CLUSTER_NAME" ] || [ "$AKS_CLUSTER_NAME" = "null" ]; then
-          echo "❌ Failed to get AKS cluster name from deployment outputs"
-          echo "Raw deployment output:"
-          echo "$DEPLOYMENT_OUTPUT" | jq '.'
-          echo ""
-          echo "Available outputs:"
-          echo "$DEPLOYMENT_OUTPUT" | jq '.properties.outputs // {}'
-          exit 1
-        fi
-        
-        # Set outputs
-        echo "AKS_CLUSTER_NAME=$AKS_CLUSTER_NAME" >> $GITHUB_OUTPUT
-        echo "AZURE_RESOURCE_GROUP=${{ env.AZURE_RESOURCE_GROUP }}" >> $GITHUB_OUTPUT
-        echo "CONTAINER_REGISTRY_ENDPOINT=$CONTAINER_REGISTRY_ENDPOINT" >> $GITHUB_OUTPUT
-        echo "DEPLOYMENT_METHOD=cli" >> $GITHUB_OUTPUT
-        echo "DEPLOYMENT_SUCCESS=true" >> $GITHUB_OUTPUT
-        
-        echo "✅ Infrastructure deployed successfully!"
-        echo "   AKS Cluster: $AKS_CLUSTER_NAME"
-        echo "   Resource Group: ${{ env.AZURE_RESOURCE_GROUP }}"
-        echo "   Container Registry: $CONTAINER_REGISTRY_ENDPOINT"
-
-    - name: Emergency ARM Template Deployment (Content Consumed Error)
-      id: deploy-infra-arm-emergency
-      if: steps.deploy-infra-cli.conclusion == 'failure' && !cancelled()
-      run: |
-        # Check if the failure was due to content consumed error
-        if [ "${BICEP_FAILED_CONTENT_ERROR:-}" = "true" ]; then
-          echo "🚨 EMERGENCY: Deploying with ARM template due to 'content consumed' error"
-          echo "🔄 This bypasses the Azure CLI Bicep deployment which has session issues"
-        else
-          echo "⏭️ Skipping emergency ARM deployment - not a content consumed error"
-          echo "DEPLOYMENT_SUCCESS=false" >> $GITHUB_OUTPUT
-          exit 0
-        fi
-        
-        # Generate deployment name with timestamp
-        TIMESTAMP=$(date +%s)
-        ARM_DEPLOYMENT_NAME="zabbix-arm-emergency-${{ github.run_number }}-$TIMESTAMP"
-        echo "Emergency ARM Deployment name: $ARM_DEPLOYMENT_NAME"
-        
-        # Clear Azure CLI cache completely and re-authenticate fresh
-        echo "🧹 Performing complete Azure CLI session reset..."
-        rm -rf ~/.azure/logs ~/.azure/commandIndex.json ~/.azure/telemetry.txt 2>/dev/null || true
-        rm -rf ~/.azure/httpCache ~/.azure/aadCache ~/.azure/msal_cache.json 2>/dev/null || true
-        az logout 2>/dev/null || true
-        az account clear 2>/dev/null || true
-        
-        echo "🔐 Establishing fresh Azure CLI session for ARM deployment..."
-        CLIENT_ID=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r .clientId)
-        CLIENT_SECRET=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r .clientSecret)
-        TENANT_ID=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r .tenantId)
-        
-        az login \
-          --service-principal \
-          --username "$CLIENT_ID" \
-          --password "$CLIENT_SECRET" \
-          --tenant "$TENANT_ID" > /dev/null
-        
-        az account set --subscription "${{ env.AZURE_SUBSCRIPTION_ID }}"
-        echo "✅ Fresh session established"
-        
-        # Deploy ARM template immediately (no retries needed - this usually works)
-        echo "🏗️ Deploying ARM template (emergency fallback)..."
-        
-        # Generate environment name with DevOps naming convention
-        ENV_SUFFIX="${{ github.event.inputs.environment_suffix }}"
-        if [ -n "$ENV_SUFFIX" ]; then
-          DEPLOYMENT_ENV_NAME="zabbix-devops-${{ env.AZURE_LOCATION }}-${{ github.run_number }}-$ENV_SUFFIX"
-        else
-          DEPLOYMENT_ENV_NAME="zabbix-devops-${{ env.AZURE_LOCATION }}-${{ github.run_number }}"
-        fi
-        
-        set +e  # Don't exit on error
-        ARM_DEPLOYMENT_OUTPUT=$(timeout 1800 az deployment group create \
-          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-          --template-file infra/main-arm.json \
-          --parameters environmentName="$DEPLOYMENT_ENV_NAME" \
-                       location="${{ env.AZURE_LOCATION }}" \
-          --name "$ARM_DEPLOYMENT_NAME" \
-          --mode Incremental \
-          --output json \
-          --only-show-errors 2>&1)
-        ARM_DEPLOYMENT_EXIT_CODE=$?
-        set -e  # Re-enable exit on error
-        
-        if [ $ARM_DEPLOYMENT_EXIT_CODE -ne 0 ]; then
-          echo "❌ Emergency ARM template deployment failed with exit code $ARM_DEPLOYMENT_EXIT_CODE"
-          echo "Error output:"
-          echo "$ARM_DEPLOYMENT_OUTPUT"
-          echo "DEPLOYMENT_SUCCESS=false" >> $GITHUB_OUTPUT
-        else
-          echo "✅ Emergency ARM template deployment successful!"
-          
-          # Extract outputs
-          AKS_CLUSTER_NAME=$(echo "$ARM_DEPLOYMENT_OUTPUT" | jq -r '.properties.outputs.AKS_CLUSTER_NAME.value // empty')
-          CONTAINER_REGISTRY_ENDPOINT=$(echo "$ARM_DEPLOYMENT_OUTPUT" | jq -r '.properties.outputs.CONTAINER_REGISTRY_ENDPOINT.value // empty')
-          
-          if [ -z "$AKS_CLUSTER_NAME" ] || [ "$AKS_CLUSTER_NAME" = "null" ]; then
-            echo "❌ Failed to get AKS cluster name from emergency ARM deployment outputs"
-            echo "DEPLOYMENT_SUCCESS=false" >> $GITHUB_OUTPUT
-          else
-            # Set outputs
-            echo "AKS_CLUSTER_NAME=$AKS_CLUSTER_NAME" >> $GITHUB_OUTPUT
-            echo "AZURE_RESOURCE_GROUP=${{ env.AZURE_RESOURCE_GROUP }}" >> $GITHUB_OUTPUT
-            echo "CONTAINER_REGISTRY_ENDPOINT=$CONTAINER_REGISTRY_ENDPOINT" >> $GITHUB_OUTPUT
-            echo "DEPLOYMENT_METHOD=arm-emergency" >> $GITHUB_OUTPUT
-            echo "DEPLOYMENT_SUCCESS=true" >> $GITHUB_OUTPUT
-            
-            echo "✅ Emergency ARM Infrastructure deployed successfully!"
-            echo "   AKS Cluster: $AKS_CLUSTER_NAME"
-            echo "   Resource Group: ${{ env.AZURE_RESOURCE_GROUP }}"
-            echo "   Container Registry: $CONTAINER_REGISTRY_ENDPOINT"
-          fi
-        fi
-
-    - name: Provision Infrastructure with PowerShell (Final Fallback)
-      id: deploy-infra-pwsh
-      if: steps.deploy-infra-azd.outputs.DEPLOYMENT_SUCCESS != 'true' && steps.deploy-infra-cli.outputs.DEPLOYMENT_SUCCESS != 'true' && steps.deploy-infra-arm-emergency.outputs.DEPLOYMENT_SUCCESS != 'true'
-      shell: pwsh
-      run: |
-        Write-Host "🚀 Attempting deployment with Azure PowerShell (final fallback)..." -ForegroundColor Cyan
-        
-        try {
-          # Install Azure PowerShell modules if not present
-          Write-Host "📦 Installing Azure PowerShell modules..." -ForegroundColor Yellow
-          if (-not (Get-Module -ListAvailable -Name Az.Accounts)) {
-            Install-Module -Name Az -Force -AllowClobber -Scope CurrentUser -Repository PSGallery
-          }
-          
-          # Import required modules
-          Import-Module Az.Accounts -Force
-          Import-Module Az.Resources -Force
-          
-          # Parse credentials for PowerShell authentication
-          $creds = '${{ secrets.AZURE_CREDENTIALS }}' | ConvertFrom-Json
-          $securePassword = ConvertTo-SecureString $creds.clientSecret -AsPlainText -Force
-          $credential = New-Object System.Management.Automation.PSCredential($creds.clientId, $securePassword)
-          
-          # Authenticate with Azure PowerShell
-          Write-Host "🔐 Authenticating with Azure PowerShell..." -ForegroundColor Blue
-          $context = Connect-AzAccount -ServicePrincipal -Credential $credential -Tenant $creds.tenantId -Subscription "${{ env.AZURE_SUBSCRIPTION_ID }}"
-          Write-Host "✅ Authentication successful" -ForegroundColor Green
-          
-          # Run the PowerShell deployment script
-          $scriptPath = Join-Path $env:GITHUB_WORKSPACE "scripts" "deploy-infrastructure-pwsh.ps1"
-          
-          if (Test-Path $scriptPath) {
-            Write-Host "🚀 Executing PowerShell deployment script..." -ForegroundColor Cyan
-            
-            # Generate environment name with DevOps naming convention
-            $envSuffix = "${{ github.event.inputs.environment_suffix }}"
-            if ([string]::IsNullOrEmpty($envSuffix)) {
-              $deploymentEnvName = "zabbix-devops-${{ env.AZURE_LOCATION }}-${{ github.run_number }}"
-            } else {
-              $deploymentEnvName = "zabbix-devops-${{ env.AZURE_LOCATION }}-${{ github.run_number }}-$envSuffix"
-            }
-            Write-Host "Deployment environment name: $deploymentEnvName" -ForegroundColor Yellow
-            Write-Host "Resources will be named with pattern: resourcename-devops-${{ env.AZURE_LOCATION }}" -ForegroundColor Yellow
-            
-            & $scriptPath -ResourceGroupName "${{ env.AZURE_RESOURCE_GROUP }}" -Location "${{ env.AZURE_LOCATION }}" -EnvironmentName $deploymentEnvName -SubscriptionId "${{ env.AZURE_SUBSCRIPTION_ID }}"
-            
-            if ($LASTEXITCODE -eq 0) {
-              Write-Host "✅ PowerShell deployment completed successfully!" -ForegroundColor Green
-            } else {
-              throw "PowerShell deployment script exited with code $LASTEXITCODE"
-            }
-          } else {
-            Write-Host "❌ PowerShell deployment script not found at: $scriptPath" -ForegroundColor Red
-            exit 1
-          }
-          
-        } catch {
-          Write-Host "❌ PowerShell deployment failed: $($_.Exception.Message)" -ForegroundColor Red
-          Write-Host "Stack trace: $($_.ScriptStackTrace)" -ForegroundColor Red
-          exit 1
-        }
-
-    - name: Provision Infrastructure with ARM Template (Alternative Fallback)
+    - name: Deploy Infrastructure with ARM Template (Fallback)
       id: deploy-infra-arm
-      if: steps.deploy-infra-azd.outputs.DEPLOYMENT_SUCCESS != 'true' && steps.deploy-infra-cli.outputs.DEPLOYMENT_SUCCESS != 'true' && steps.deploy-infra-arm-emergency.outputs.DEPLOYMENT_SUCCESS != 'true'
+      if: env.DEPLOY_ARM == 'true' && (steps.deploy-infra-terraform.outputs.DEPLOYMENT_SUCCESS != 'true' || env.INFRASTRUCTURE_METHOD == 'arm')
       run: |
-        echo "🚀 Attempting deployment with ARM template (alternative to Bicep)..."
+        echo "🚀 Deploying infrastructure using ARM template..."
         
         # Generate deployment name with timestamp
         TIMESTAMP=$(date +%s)
         ARM_DEPLOYMENT_NAME="zabbix-arm-deploy-${{ github.run_number }}-$TIMESTAMP"
         echo "ARM Deployment name: $ARM_DEPLOYMENT_NAME"
         
-        # Verify authentication first
-        echo "🔐 Verifying Azure authentication for ARM deployment..."
-        if ! az account show --output none 2>/dev/null; then
-          echo "❌ Authentication lost, re-authenticating..."
-          CLIENT_ID=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r .clientId)
-          CLIENT_SECRET=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r .clientSecret)
-          TENANT_ID=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r .tenantId)
-          
-          az login \
-            --service-principal \
-            --username "$CLIENT_ID" \
-            --password "$CLIENT_SECRET" \
-            --tenant "$TENANT_ID" > /dev/null
-          az account set --subscription "${{ env.AZURE_SUBSCRIPTION_ID }}"
-        fi
-        
-        # Deploy ARM template with timeout and error handling
-        echo "🏗️ Deploying ARM template..."
-        
         # Generate environment name with DevOps naming convention
         ENV_SUFFIX="${{ github.event.inputs.environment_suffix }}"
         if [ -n "$ENV_SUFFIX" ]; then
@@ -648,6 +309,10 @@ jobs:
           DEPLOYMENT_ENV_NAME="zabbix-devops-${{ env.AZURE_LOCATION }}-${{ github.run_number }}"
         fi
         
+        echo "Deployment environment name: $DEPLOYMENT_ENV_NAME"
+        echo "Resources will be named with pattern: resourcename-devops-${{ env.AZURE_LOCATION }}"
+        
+        # Deploy ARM template
         set +e  # Don't exit on error
         ARM_DEPLOYMENT_OUTPUT=$(timeout 1800 az deployment group create \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
@@ -695,47 +360,23 @@ jobs:
       id: deploy-infra
       run: |
         # Use outputs from whichever deployment method succeeded
-        if [ "${{ steps.deploy-infra-azd.outputs.DEPLOYMENT_SUCCESS }}" = "true" ]; then
-          echo "Using AZD deployment outputs"
-          echo "AKS_CLUSTER_NAME=${{ steps.deploy-infra-azd.outputs.AKS_CLUSTER_NAME }}" >> $GITHUB_OUTPUT
-          echo "AZURE_RESOURCE_GROUP=${{ steps.deploy-infra-azd.outputs.AZURE_RESOURCE_GROUP }}" >> $GITHUB_OUTPUT
-          echo "CONTAINER_REGISTRY_ENDPOINT=${{ steps.deploy-infra-azd.outputs.CONTAINER_REGISTRY_ENDPOINT }}" >> $GITHUB_OUTPUT
+        if [ "${{ steps.deploy-infra-terraform.outputs.DEPLOYMENT_SUCCESS }}" = "true" ]; then
+          echo "Using Terraform deployment outputs"
+          echo "AKS_CLUSTER_NAME=${{ steps.deploy-infra-terraform.outputs.AKS_CLUSTER_NAME }}" >> $GITHUB_OUTPUT
+          echo "AZURE_RESOURCE_GROUP=${{ steps.deploy-infra-terraform.outputs.AZURE_RESOURCE_GROUP }}" >> $GITHUB_OUTPUT
+          echo "CONTAINER_REGISTRY_ENDPOINT=${{ steps.deploy-infra-terraform.outputs.CONTAINER_REGISTRY_ENDPOINT }}" >> $GITHUB_OUTPUT
           echo "DEPLOYMENT_SUCCESS=true" >> $GITHUB_OUTPUT
-          echo "✅ Used AZD for deployment" >> $GITHUB_STEP_SUMMARY
-        elif [ "${{ steps.deploy-infra-cli.outputs.DEPLOYMENT_SUCCESS }}" = "true" ]; then
-          echo "Using Azure CLI deployment outputs"
-          echo "AKS_CLUSTER_NAME=${{ steps.deploy-infra-cli.outputs.AKS_CLUSTER_NAME }}" >> $GITHUB_OUTPUT
-          echo "AZURE_RESOURCE_GROUP=${{ steps.deploy-infra-cli.outputs.AZURE_RESOURCE_GROUP }}" >> $GITHUB_OUTPUT
-          echo "CONTAINER_REGISTRY_ENDPOINT=${{ steps.deploy-infra-cli.outputs.CONTAINER_REGISTRY_ENDPOINT }}" >> $GITHUB_OUTPUT
-          echo "DEPLOYMENT_SUCCESS=true" >> $GITHUB_OUTPUT
-          echo "✅ Used Azure CLI for deployment (AZD fallback)" >> $GITHUB_STEP_SUMMARY
-        elif [ "${{ steps.deploy-infra-arm-emergency.outputs.DEPLOYMENT_SUCCESS }}" = "true" ]; then
-          echo "Using Emergency ARM template deployment outputs"
-          echo "AKS_CLUSTER_NAME=${{ steps.deploy-infra-arm-emergency.outputs.AKS_CLUSTER_NAME }}" >> $GITHUB_OUTPUT
-          echo "AZURE_RESOURCE_GROUP=${{ steps.deploy-infra-arm-emergency.outputs.AZURE_RESOURCE_GROUP }}" >> $GITHUB_OUTPUT
-          echo "CONTAINER_REGISTRY_ENDPOINT=${{ steps.deploy-infra-arm-emergency.outputs.CONTAINER_REGISTRY_ENDPOINT }}" >> $GITHUB_OUTPUT
-          echo "DEPLOYMENT_SUCCESS=true" >> $GITHUB_OUTPUT
-          echo "✅ Used Emergency ARM template for deployment (content consumed error fallback)" >> $GITHUB_STEP_SUMMARY
-        elif [ "${{ steps.deploy-infra-pwsh.outputs.DEPLOYMENT_SUCCESS }}" = "true" ]; then
-          echo "Using Azure PowerShell deployment outputs"
-          echo "AKS_CLUSTER_NAME=${{ steps.deploy-infra-pwsh.outputs.AKS_CLUSTER_NAME }}" >> $GITHUB_OUTPUT
-          echo "AZURE_RESOURCE_GROUP=${{ steps.deploy-infra-pwsh.outputs.AZURE_RESOURCE_GROUP }}" >> $GITHUB_OUTPUT
-          echo "CONTAINER_REGISTRY_ENDPOINT=${{ steps.deploy-infra-pwsh.outputs.CONTAINER_REGISTRY_ENDPOINT }}" >> $GITHUB_OUTPUT
-          echo "DEPLOYMENT_SUCCESS=true" >> $GITHUB_OUTPUT
-          echo "✅ Used Azure PowerShell for deployment (final fallback)" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Used Terraform for deployment" >> $GITHUB_STEP_SUMMARY
         elif [ "${{ steps.deploy-infra-arm.outputs.DEPLOYMENT_SUCCESS }}" = "true" ]; then
           echo "Using ARM template deployment outputs"
           echo "AKS_CLUSTER_NAME=${{ steps.deploy-infra-arm.outputs.AKS_CLUSTER_NAME }}" >> $GITHUB_OUTPUT
           echo "AZURE_RESOURCE_GROUP=${{ steps.deploy-infra-arm.outputs.AZURE_RESOURCE_GROUP }}" >> $GITHUB_OUTPUT
           echo "CONTAINER_REGISTRY_ENDPOINT=${{ steps.deploy-infra-arm.outputs.CONTAINER_REGISTRY_ENDPOINT }}" >> $GITHUB_OUTPUT
           echo "DEPLOYMENT_SUCCESS=true" >> $GITHUB_OUTPUT
-          echo "✅ Used ARM template for deployment (alternative fallback)" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Used ARM template for deployment" >> $GITHUB_STEP_SUMMARY
         else
           echo "❌ All deployment methods failed or returned empty outputs" >> $GITHUB_STEP_SUMMARY
-          echo "AZD success: ${{ steps.deploy-infra-azd.outputs.DEPLOYMENT_SUCCESS }}"
-          echo "CLI success: ${{ steps.deploy-infra-cli.outputs.DEPLOYMENT_SUCCESS }}"
-          echo "Emergency ARM success: ${{ steps.deploy-infra-arm-emergency.outputs.DEPLOYMENT_SUCCESS }}"
-          echo "PowerShell success: ${{ steps.deploy-infra-pwsh.outputs.DEPLOYMENT_SUCCESS }}"
+          echo "Terraform success: ${{ steps.deploy-infra-terraform.outputs.DEPLOYMENT_SUCCESS }}"
           echo "ARM success: ${{ steps.deploy-infra-arm.outputs.DEPLOYMENT_SUCCESS }}"
           echo "DEPLOYMENT_SUCCESS=false" >> $GITHUB_OUTPUT
           exit 1
@@ -745,28 +386,13 @@ jobs:
       run: |
         echo ""
         echo "=== Final Deployment Results ==="
-        if [ "${{ steps.deploy-infra-azd.outputs.DEPLOYMENT_SUCCESS }}" = "true" ]; then
-          echo "✅ Deployment Method: Azure Developer CLI (AZD)"
-          echo "AKS Cluster Name: ${{ steps.deploy-infra-azd.outputs.AKS_CLUSTER_NAME }}"
-          echo "Resource Group: ${{ steps.deploy-infra-azd.outputs.AZURE_RESOURCE_GROUP }}"
-          echo "Container Registry: ${{ steps.deploy-infra-azd.outputs.CONTAINER_REGISTRY_ENDPOINT }}"
-        elif [ "${{ steps.deploy-infra-cli.outputs.DEPLOYMENT_SUCCESS }}" = "true" ]; then
-          echo "✅ Deployment Method: Azure CLI (Fallback)"
-          echo "AKS Cluster Name: ${{ steps.deploy-infra-cli.outputs.AKS_CLUSTER_NAME }}"
-          echo "Resource Group: ${{ steps.deploy-infra-cli.outputs.AZURE_RESOURCE_GROUP }}"
-          echo "Container Registry: ${{ steps.deploy-infra-cli.outputs.CONTAINER_REGISTRY_ENDPOINT }}"
-        elif [ "${{ steps.deploy-infra-arm-emergency.outputs.DEPLOYMENT_SUCCESS }}" = "true" ]; then
-          echo "✅ Deployment Method: Emergency ARM Template (Content Consumed Error Fallback)"
-          echo "AKS Cluster Name: ${{ steps.deploy-infra-arm-emergency.outputs.AKS_CLUSTER_NAME }}"
-          echo "Resource Group: ${{ steps.deploy-infra-arm-emergency.outputs.AZURE_RESOURCE_GROUP }}"
-          echo "Container Registry: ${{ steps.deploy-infra-arm-emergency.outputs.CONTAINER_REGISTRY_ENDPOINT }}"
-        elif [ "${{ steps.deploy-infra-pwsh.outputs.DEPLOYMENT_SUCCESS }}" = "true" ]; then
-          echo "✅ Deployment Method: Azure PowerShell (Final Fallback)"
-          echo "AKS Cluster Name: ${{ steps.deploy-infra-pwsh.outputs.AKS_CLUSTER_NAME }}"
-          echo "Resource Group: ${{ steps.deploy-infra-pwsh.outputs.AZURE_RESOURCE_GROUP }}"
-          echo "Container Registry: ${{ steps.deploy-infra-pwsh.outputs.CONTAINER_REGISTRY_ENDPOINT }}"
+        if [ "${{ steps.deploy-infra-terraform.outputs.DEPLOYMENT_SUCCESS }}" = "true" ]; then
+          echo "✅ Deployment Method: Terraform"
+          echo "AKS Cluster Name: ${{ steps.deploy-infra-terraform.outputs.AKS_CLUSTER_NAME }}"
+          echo "Resource Group: ${{ steps.deploy-infra-terraform.outputs.AZURE_RESOURCE_GROUP }}"
+          echo "Container Registry: ${{ steps.deploy-infra-terraform.outputs.CONTAINER_REGISTRY_ENDPOINT }}"
         elif [ "${{ steps.deploy-infra-arm.outputs.DEPLOYMENT_SUCCESS }}" = "true" ]; then
-          echo "✅ Deployment Method: ARM Template (Alternative Fallback)"
+          echo "✅ Deployment Method: ARM Template"
           echo "AKS Cluster Name: ${{ steps.deploy-infra-arm.outputs.AKS_CLUSTER_NAME }}"
           echo "Resource Group: ${{ steps.deploy-infra-arm.outputs.AZURE_RESOURCE_GROUP }}"
           echo "Container Registry: ${{ steps.deploy-infra-arm.outputs.CONTAINER_REGISTRY_ENDPOINT }}"

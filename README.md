@@ -9,6 +9,16 @@ This repository contains the Infrastructure as Code (IaC) and Kubernetes manifes
 - **NGINX Ingress Controller** for internal routing
 - **Automated CI/CD** deployment via GitHub Actions
 
+## 🔧 Infrastructure Deployment Methods
+
+This deployment supports **multiple infrastructure deployment methods** for maximum flexibility:
+
+1. **Terraform** (Recommended) - Modern IaC with advanced state management
+2. **ARM Templates** - Native Azure resource management with fallback support
+3. **Both** - Try Terraform first, fallback to ARM templates if needed
+
+The GitHub Actions workflow automatically handles method selection and fallback logic.
+
 ## 🏗️ Architecture Overview
 
 ```
@@ -76,7 +86,7 @@ Example: `zabbix-devops-eastus-123` or `zabbix-devops-eastus-123-staging`
 ### Prerequisites
 
 1. **Azure CLI** installed and configured
-2. **GitHub** repository with secrets configured
+2. **GitHub** repository with secrets configured  
 3. **Domain name** configured (dal2-devmon-mgt.forescout.com)
 4. **SSL Certificate** for HTTPS (optional but recommended)
 
@@ -106,50 +116,70 @@ The `AZURE_CREDENTIALS` should be in the following format:
    - Update the resource group name if needed
    - Modify the Azure location if required
 
-3. **Push to main branch** or manually trigger the workflow:
+3. **Choose deployment method** via GitHub Actions workflow inputs:
+   - **Infrastructure Method**: `terraform` (recommended), `arm`, or `both`
+   - **Deployment Type**: `full`, `infrastructure-only`, `application-only`, or `redeploy-clean`
+
+4. **Push to main branch** or manually trigger the workflow:
    ```bash
    git push origin main
    ```
 
-4. **Monitor the deployment** in GitHub Actions
+5. **Monitor the deployment** in GitHub Actions
 
-5. **Configure DNS** once deployment completes:
+6. **Configure DNS** once deployment completes:
    - Point `dal2-devmon-mgt.forescout.com` to the Application Gateway IP
 
 ## 🔧 Manual Deployment
 
 If you prefer to deploy manually:
 
-### 1. Deploy Infrastructure
+### Option 1: Terraform Deployment
 
 ```bash
 # Clone the repository
 git clone <your-repo-url>
 cd Zabbix
 
-# Install Azure Developer CLI
-curl -fsSL https://aka.ms/install-azd.sh | bash
+# Navigate to Terraform directory
+cd infra/terraform
 
-# Login to Azure
-azd auth login
+# Initialize Terraform
+terraform init
 
-# Set environment variables
-azd env set AZURE_ENV_NAME "zabbix-production"
-azd env set AZURE_LOCATION "eastus"
-azd env set AZURE_SUBSCRIPTION_ID "d9b2a1cf-f99b-4f9e-a6cf-c79a078406bf"
-azd env set AZURE_RESOURCE_GROUP "Devops-Test"
+# Create terraform.tfvars file (see terraform.tfvars.example)
+cp terraform.tfvars.example terraform.tfvars
+# Edit terraform.tfvars with your values
+
+# Plan deployment
+terraform plan
 
 # Deploy infrastructure
-azd provision
+terraform apply
 ```
 
-### 2. Deploy Zabbix Application
+### Option 2: ARM Template Deployment
 
 ```bash
-# Get AKS credentials
+# Clone the repository
+git clone <your-repo-url>
+cd Zabbix
+
+# Deploy using Azure CLI
+az deployment group create \
+  --resource-group Devops-Test \
+  --template-file infra/main-arm.json \
+  --parameters environmentName="zabbix-devops-eastus-manual" \
+               location="eastus"
+```
+
+### Deploy Zabbix Application
+
+```bash
+# Get AKS credentials (replace with your cluster name)
 az aks get-credentials \
   --resource-group Devops-Test \
-  --name $(azd env get-value AKS_CLUSTER_NAME)
+  --name aks-devops-eastus
 
 # Deploy Zabbix components
 kubectl apply -f k8s/zabbix-config.yaml
@@ -220,7 +250,7 @@ kubectl scale deployment zabbix-web -n zabbix --replicas=3
 # Scale AKS worker nodes
 az aks nodepool scale \
   --resource-group Devops-Test \
-  --cluster-name $(azd env get-value AKS_CLUSTER_NAME) \
+  --cluster-name aks-devops-eastus \
   --name workerpool \
   --node-count 5
 ```
@@ -248,8 +278,19 @@ After successful deployment:
 ├── .github/workflows/
 │   └── deploy.yml              # GitHub Actions CI/CD pipeline
 ├── infra/
-│   ├── main.bicep             # Main infrastructure template
-│   └── main.parameters.json   # Infrastructure parameters
+│   ├── terraform/              # Terraform configuration (recommended)
+│   │   ├── main.tf            # Main infrastructure configuration
+│   │   ├── variables.tf       # Variable definitions
+│   │   ├── network.tf         # Network resources
+│   │   ├── aks.tf            # AKS cluster configuration
+│   │   ├── identity.tf       # Managed identities
+│   │   ├── monitoring.tf     # Log Analytics and monitoring
+│   │   ├── appgateway.tf     # Application Gateway
+│   │   ├── outputs.tf        # Output values
+│   │   ├── terraform.tfvars.example  # Example variables file
+│   │   └── README.md         # Terraform-specific documentation
+│   ├── main.bicep             # Legacy Bicep template (deprecated)
+│   └── main-arm.json         # ARM template (fallback)
 ├── k8s/
 │   ├── zabbix-config.yaml     # Namespace and configuration
 │   ├── zabbix-mysql.yaml      # MySQL database
@@ -257,9 +298,14 @@ After successful deployment:
 │   ├── zabbix-web.yaml        # Web interface
 │   ├── zabbix-ingress.yaml    # Ingress configuration
 │   └── zabbix-additional.yaml # Java Gateway and Proxy
+├── scripts/
+│   ├── deploy-infrastructure-pwsh.ps1  # PowerShell deployment script
+│   └── verify-deployment-readiness.ps1 # Validation script
 ├── docs/
-│   └── ssl-configuration.md   # SSL setup guide
-├── azure.yaml                 # AZD configuration
+│   ├── ssl-configuration.md   # SSL setup guide
+│   ├── deployment-guide.md    # Detailed deployment guide
+│   └── manual-service-principal-setup.md  # Service principal setup
+├── azure.yaml                 # Legacy AZD configuration (deprecated)
 └── README.md                  # This file
 ```
 
@@ -307,10 +353,16 @@ data:
 
 The GitHub Actions workflow includes:
 
-1. **Infrastructure Deployment** - Provisions AKS and supporting resources
-2. **Application Deployment** - Deploys Zabbix components
+1. **Infrastructure Deployment** - Provisions AKS and supporting resources using Terraform or ARM templates
+2. **Application Deployment** - Deploys Zabbix components to Kubernetes
 3. **Security Configuration** - Applies security settings
 4. **Health Verification** - Validates deployment success
+
+### Infrastructure Methods
+
+- **Terraform** (Recommended): Modern IaC with state management, plan/apply workflow
+- **ARM Templates**: Native Azure deployment with JSON templates
+- **Both**: Intelligent fallback - tries Terraform first, falls back to ARM if needed
 
 ### Workflow Triggers
 
@@ -320,7 +372,24 @@ The GitHub Actions workflow includes:
 
 ## 🔄 GitHub Actions Deployment Options
 
-This repository includes a comprehensive GitHub Actions workflow (`deploy.yml`) that supports multiple deployment scenarios:
+This repository includes a comprehensive GitHub Actions workflow (`deploy.yml`) that supports multiple deployment scenarios and infrastructure methods:
+
+### Infrastructure Method Selection
+
+1. **Terraform** (Recommended)
+   - Modern Infrastructure as Code with state management
+   - Advanced planning and validation capabilities
+   - Better error handling and rollback support
+
+2. **ARM Templates**
+   - Native Azure Resource Manager templates
+   - Fast deployment for simple scenarios
+   - Reliable fallback option
+
+3. **Both** (Smart Fallback)
+   - Attempts Terraform deployment first
+   - Automatically falls back to ARM templates if Terraform fails
+   - Best of both worlds for maximum reliability
 
 ### Deployment Types
 
@@ -344,6 +413,7 @@ This repository includes a comprehensive GitHub Actions workflow (`deploy.yml`) 
 
 You can customize your deployment by using **GitHub Actions → Run workflow** with these options:
 
+- **Infrastructure Method**: Choose from `terraform` (recommended), `arm`, or `both`
 - **Deployment Type**: Choose from full, infrastructure-only, application-only, or redeploy-clean
 - **Force PowerShell**: Use Azure PowerShell instead of Azure CLI (fallback option)
 - **Reset Database**: ⚠️ **WARNING**: Destroys all Zabbix data and creates fresh database
@@ -377,26 +447,38 @@ You can customize your deployment by using **GitHub Actions → Run workflow** w
 ### Fallback Options
 
 The workflow includes multiple fallback mechanisms:
-- **Azure CLI** → **Emergency ARM Template** → **PowerShell** → **Regular ARM Template**
+- **Terraform** → **ARM Templates** → **PowerShell** deployment methods
 - Built-in retry logic for network issues
 - Automatic session reset for "content consumed" errors
 - Smart cleanup that preserves data by default
 
 ## 🛠️ Troubleshooting and Testing
 
-### Local Template Testing
+### Infrastructure Validation
 
-Before deploying, you can test the Bicep template locally:
-
+**Terraform:**
 ```bash
-# Make script executable
-chmod +x scripts/test-template-local.sh
+# Navigate to Terraform directory
+cd infra/terraform
 
-# Run full validation
-./scripts/test-template-local.sh
+# Validate configuration
+terraform validate
 
-# Run syntax validation only
-./scripts/test-template-local.sh --syntax-only
+# Check formatting
+terraform fmt -check
+
+# Plan deployment (dry run)
+terraform plan
+```
+
+**ARM Template:**
+```bash
+# Validate ARM template
+az deployment group validate \
+  --resource-group Devops-Test \
+  --template-file infra/main-arm.json \
+  --parameters environmentName="test-validation"
+```
 
 # Run what-if analysis only
 ./scripts/test-template-local.sh --whatif-only

@@ -1,5 +1,9 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
 
+# ⚠️ DEPRECATED: This file is deprecated and no longer used for deployments
+# The GitHub Actions workflow now uses Terraform (recommended) and ARM templates
+# This file is kept for reference only
+
 name: zabbix-aks-deployment
 metadata:
   template: zabbix-aks-deployment@0.0.1-beta

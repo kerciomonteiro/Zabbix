@@ -175,25 +175,77 @@ try {
         }
     }
 
-    # Check 5: Bicep template validation
-    Write-ColorOutput "`n5️⃣ Validating Bicep template..." "Yellow"
+    # Check 5: Infrastructure template validation
+    Write-ColorOutput "`n5️⃣ Validating infrastructure templates..." "Yellow"
+    
+    # Check Terraform configuration
+    $terraformPath = Join-Path $PSScriptRoot ".." "infra" "terraform"
+    if (Test-Path $terraformPath) {
+        Add-TestResult "Terraform Directory Exists" $true
+        
+        # Check for terraform command
+        try {
+            $terraformVersion = terraform version 2>&1
+            if ($LASTEXITCODE -eq 0) {
+                Add-TestResult "Terraform CLI Available" $true "Version: $($terraformVersion | Select-Object -First 1)"
+                
+                # Validate Terraform configuration
+                try {
+                    Push-Location $terraformPath
+                    $validateOutput = terraform validate 2>&1
+                    if ($LASTEXITCODE -eq 0) {
+                        Add-TestResult "Terraform Configuration Valid" $true "Configuration is valid"
+                    } else {
+                        Add-TestResult "Terraform Configuration Valid" $false "Validation errors: $validateOutput"
+                    }
+                } catch {
+                    Add-TestResult "Terraform Configuration Valid" $false "Cannot validate configuration: $($_.Exception.Message)"
+                } finally {
+                    Pop-Location
+                }
+            } else {
+                Add-TestResult "Terraform CLI Available" $false "Terraform not installed or not in PATH"
+            }
+        } catch {
+            Add-TestResult "Terraform CLI Available" $false "Cannot check Terraform: $($_.Exception.Message)"
+        }
+    } else {
+        Add-TestResult "Terraform Directory Exists" $false "Terraform directory not found at $terraformPath"
+    }
+    
+    # Check ARM template
+    $armPath = Join-Path $PSScriptRoot ".." "infra" "main-arm.json"
+    if (Test-Path $armPath) {
+        Add-TestResult "ARM Template Exists" $true
+        
+        # Validate ARM template JSON syntax
+        try {
+            $armTemplate = Get-Content $armPath -Raw | ConvertFrom-Json
+            Add-TestResult "ARM Template JSON Valid" $true "JSON syntax is valid"
+        } catch {
+            Add-TestResult "ARM Template JSON Valid" $false "JSON syntax error: $($_.Exception.Message)"
+        }
+    } else {
+        Add-TestResult "ARM Template Exists" $false "ARM template not found at $armPath"
+    }
+    
+    # Legacy Bicep template (deprecated but still check)
     $bicepPath = Join-Path $PSScriptRoot ".." "infra" "main.bicep"
     if (Test-Path $bicepPath) {
-        Add-TestResult "Bicep Template Exists" $true
+        Add-TestResult "Bicep Template Exists (Legacy)" $true "⚠️ Deprecated - use Terraform or ARM instead"
         
-        # Try to build/validate template
         try {
             $buildOutput = az bicep build --file $bicepPath 2>&1
             if ($LASTEXITCODE -eq 0) {
-                Add-TestResult "Bicep Template Validation" $true "Template builds successfully"
+                Add-TestResult "Bicep Template Validation (Legacy)" $true "Template builds successfully (deprecated)"
             } else {
-                Add-TestResult "Bicep Template Validation" $false "Build errors: $buildOutput"
+                Add-TestResult "Bicep Template Validation (Legacy)" $false "Build errors: $buildOutput"
             }
         } catch {
-            Add-TestResult "Bicep Template Validation" $false "Cannot validate template"
+            Add-TestResult "Bicep Template Validation (Legacy)" $false "Cannot validate template"
         }
     } else {
-        Add-TestResult "Bicep Template Exists" $false "Template not found at $bicepPath"
+        Add-TestResult "Bicep Template Exists (Legacy)" $false "Template not found (OK - using Terraform/ARM)"
     }
 
     # Check 6: Kubernetes manifests
