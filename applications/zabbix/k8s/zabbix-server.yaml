@@ -55,6 +55,16 @@ spec:
           value: "3600"
         - name: ZBX_PROXYDATAFREQUENCY
           value: "1"
+        # Enable database auto-initialization
+        - name: DB_SERVER_ROOT_USER
+          value: "root"
+        - name: DB_SERVER_ROOT_PASS
+          valueFrom:
+            secretKeyRef:
+              name: zabbix-db-secret
+              key: mysql-root-password
+        - name: DB_SERVER_SCHEMA
+          value: ""
         volumeMounts:
         - name: zabbix-server-alertscripts
           mountPath: /usr/lib/zabbix/alertscripts

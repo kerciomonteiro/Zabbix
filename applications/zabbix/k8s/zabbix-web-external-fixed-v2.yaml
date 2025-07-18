@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: zabbix-web-external
+  namespace: zabbix
+  labels:
+    app: zabbix-web
+  annotations:
+    service.beta.kubernetes.io/azure-load-balancer-health-probe-request-path: /
+    service.beta.kubernetes.io/azure-load-balancer-health-probe-protocol: http
+    service.beta.kubernetes.io/azure-load-balancer-health-probe-port: "8080"
+spec:
+  type: LoadBalancer
+  loadBalancerSourceRanges:
+  - 0.0.0.0/0
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+    protocol: TCP
+  selector:
+    app: zabbix-web
