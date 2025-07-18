@@ -518,7 +518,11 @@ jobs:
         echo "Reset Database: ${{ github.event.inputs.reset_database }}"
         
         # Delete Zabbix deployments and services
-        kubectl delete deployment,service,ingress,configmap,secret -n zabbix --all --ignore-not-found=true
+        kubectl delete deployment --all -n zabbix --ignore-not-found=true
+        kubectl delete service --all -n zabbix --ignore-not-found=true
+        kubectl delete ingress --all -n zabbix --ignore-not-found=true
+        kubectl delete configmap --all -n zabbix --ignore-not-found=true
+        kubectl delete secret --all -n zabbix --ignore-not-found=true
         
         # Wait for pods to terminate
         kubectl wait --for=delete pods --all -n zabbix --timeout=120s || true
@@ -536,11 +540,16 @@ jobs:
       run: |
         echo "🔄 Performing smart cleanup (preserving data)..."
         
-        # Only delete deployments and services, keep PVCs and secrets
-        kubectl delete deployment,service,ingress -n zabbix --ignore-not-found=true
+        # Create namespace if it doesn't exist
+        kubectl create namespace zabbix --dry-run=client -o yaml | kubectl apply -f -
         
-        # Wait for pods to terminate
-        kubectl wait --for=delete pods -l app!=zabbix-mysql -n zabbix --timeout=60s || true
+        # Only delete deployments and services, keep PVCs and secrets
+        kubectl delete deployment --all -n zabbix --ignore-not-found=true
+        kubectl delete service --all -n zabbix --ignore-not-found=true
+        kubectl delete ingress --all -n zabbix --ignore-not-found=true
+        
+        # Wait for pods to terminate (but not MySQL pods)
+        kubectl wait --for=delete pods -l app!=zabbix-mysql -n zabbix --timeout=60s || echo "⚠️ Some pods may still be terminating"
         
         echo "✅ Smart cleanup completed - data preserved"
 
@@ -845,7 +854,9 @@ jobs:
           kubectl delete all,pvc,configmap,secret -n zabbix --all --ignore-not-found=true
         else
           echo "🔄 Performing smart cleanup (preserving data)..."
-          kubectl delete deployment,service,ingress -n zabbix --ignore-not-found=true
+          kubectl delete deployment --all -n zabbix --ignore-not-found=true
+          kubectl delete service --all -n zabbix --ignore-not-found=true
+          kubectl delete ingress --all -n zabbix --ignore-not-found=true
         fi
         
         # Deploy MySQL
