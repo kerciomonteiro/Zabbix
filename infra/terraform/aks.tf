@@ -19,7 +19,7 @@ resource "azurerm_kubernetes_cluster" "main" {
     os_disk_size_gb    = 128
     os_disk_type       = "Managed"
     vnet_subnet_id     = azurerm_subnet.aks.id
-    max_pods           = 110
+    max_pods           = var.max_pods_per_node
     
     # System node pool should be in zones for HA (eastus supports zones 2,3)
     zones = ["2", "3"]
@@ -52,8 +52,11 @@ resource "azurerm_kubernetes_cluster" "main" {
 
   # API Server Configuration
   api_server_access_profile {
-    authorized_ip_ranges = []
+    authorized_ip_ranges = var.authorized_ip_ranges
   }
+
+  # Private Cluster Configuration
+  private_cluster_enabled = var.enable_private_cluster
 
   # Azure Monitor Integration
   dynamic "oms_agent" {
@@ -73,8 +76,11 @@ resource "azurerm_kubernetes_cluster" "main" {
 
   # Security Profile
   # Workload Identity is enabled for enhanced security
-  workload_identity_enabled = true
-  oidc_issuer_enabled      = true
+  workload_identity_enabled = var.enable_workload_identity
+  oidc_issuer_enabled      = var.enable_workload_identity
+  
+  # Azure RBAC for Kubernetes authorization
+  role_based_access_control_enabled = var.enable_azure_rbac
 
   # Maintenance Window (optional)
   maintenance_window {
@@ -107,16 +113,16 @@ resource "azurerm_kubernetes_cluster_node_pool" "user" {
   vnet_subnet_id        = azurerm_subnet.aks.id
   
   # Auto-scaling configuration
-  enable_auto_scaling = var.enable_auto_scaling
-  node_count = var.enable_auto_scaling ? null : var.aks_user_node_count
-  min_count  = var.enable_auto_scaling ? var.aks_user_node_min_count : null
-  max_count  = var.enable_auto_scaling ? var.aks_user_node_max_count : null
+  enable_auto_scaling = var.enable_cluster_autoscaler
+  node_count = var.enable_cluster_autoscaler ? null : var.aks_user_node_count
+  min_count  = var.enable_cluster_autoscaler ? var.aks_user_node_min_count : null
+  max_count  = var.enable_cluster_autoscaler ? var.aks_user_node_max_count : null
   
   # High availability across zones (eastus supports zones 2,3)
   zones = ["2", "3"]
   
   # Node configuration
-  max_pods = 110
+  max_pods = var.max_pods_per_node
   
   # Node labels for workload identification
   node_labels = {

@@ -1,5 +1,5 @@
-# Terraform configuration for Zabbix AKS Infrastructure
-# This replaces the Bicep template with Terraform for better multi-cloud support
+# Terraform configuration for Multi-Application AKS Platform
+# This infrastructure supports multiple applications with proper isolation and security
 
 terraform {
   required_version = ">= 1.0"
@@ -10,6 +10,14 @@ terraform {
     }
     azuread = {
       source  = "hashicorp/azuread"
+      version = "~> 2.0"
+    }
+    kubernetes = {
+      source  = "hashicorp/kubernetes"
+      version = "~> 2.0"
+    }
+    helm = {
+      source  = "hashicorp/helm"
       version = "~> 2.0"
     }
   }
@@ -31,10 +39,10 @@ provider "azurerm" {
 provider "azuread" {
 }
 
-# Import block for existing AKS cluster
+# Import blocks for existing resources
 import {
-  to = azurerm_kubernetes_cluster.main
-  id = "/subscriptions/d9b2a1cf-f99b-4f9e-a6cf-c79a078406bf/resourceGroups/Devops-Test/providers/Microsoft.ContainerService/managedClusters/aks-devops-eastus"
+  to = azurerm_kubernetes_cluster_node_pool.user
+  id = "/subscriptions/d9b2a1cf-f99b-4f9e-a6cf-c79a078406bf/resourceGroups/Devops-Test/providers/Microsoft.ContainerService/managedClusters/aks-devops-eastus/agentPools/workerpool"
 }
 
 # Data sources for existing resources
@@ -56,7 +64,7 @@ locals {
     appgw_subnet        = "subnet-appgw-${local.devops_naming_suffix}"
     identity            = "id-${local.devops_naming_suffix}"
     log_analytics       = "law-${local.devops_naming_suffix}"
-    container_registry  = "acrzabbixdevops${lower(var.location)}"
+    container_registry  = "acrdevops${lower(var.location)}"
     app_gateway         = "appgw-${local.devops_naming_suffix}"
     public_ip           = "pip-appgw-${local.devops_naming_suffix}"
     nsg_aks             = "nsg-aks-${local.devops_naming_suffix}"
@@ -66,7 +74,8 @@ locals {
   common_tags = {
     "azd-env-name" = var.environment_name
     "environment"  = var.environment_name
-    "project"      = "zabbix"
+    "project"      = "multi-app-platform"
     "managed-by"   = "terraform"
+    "platform"     = "kubernetes"
   }
 }

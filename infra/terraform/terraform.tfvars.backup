@@ -1,0 +1,134 @@
+# Terraform variables for Multi-Application AKS Infrastructure deployment
+
+# Basic Configuration
+resource_group_name = "Devops-Test"
+location           = "eastus"
+environment_name   = "multi-app-platform-eastus-001"
+
+# AKS Configuration - IMPORTANT: Use supported version for Free tier
+kubernetes_version = "1.32"
+
+# Multi-Application Features
+enable_application_insights = true
+application_insights_retention_days = 90
+
+# Application Namespaces (add new applications here)
+application_namespaces = {
+  zabbix = {
+    name = "zabbix"
+    labels = {
+      "app.kubernetes.io/name"      = "zabbix"
+      "app.kubernetes.io/component" = "monitoring"
+      "app.kubernetes.io/part-of"   = "observability"
+    }
+    annotations = {
+      "description" = "Zabbix monitoring application"
+    }
+    quotas = {
+      requests_cpu    = "2000m"
+      requests_memory = "4Gi"
+      limits_cpu      = "4000m"
+      limits_memory   = "8Gi"
+      pods            = 20
+      services        = 10
+      pvcs            = 5
+    }
+  }
+  
+  # Example: Prometheus monitoring stack
+  # prometheus = {
+  #   name = "prometheus"
+  #   labels = {
+  #     "app.kubernetes.io/name"      = "prometheus"
+  #     "app.kubernetes.io/component" = "metrics"
+  #     "app.kubernetes.io/part-of"   = "observability"
+  #   }
+  #   annotations = {
+  #     "description" = "Prometheus metrics collection and alerting"
+  #   }
+  #   quotas = {
+  #     requests_cpu    = "1000m"
+  #     requests_memory = "2Gi"
+  #     limits_cpu      = "2000m"
+  #     limits_memory   = "4Gi"
+  #     pods            = 15
+  #     services        = 8
+  #     pvcs            = 3
+  #   }
+  # }
+  
+  # Example: Web application
+  # webapp = {
+  #   name = "webapp"
+  #   labels = {
+  #     "app.kubernetes.io/name"      = "webapp"
+  #     "app.kubernetes.io/component" = "frontend"
+  #     "app.kubernetes.io/part-of"   = "application"
+  #   }
+  #   annotations = {
+  #     "description" = "Frontend web application"
+  #   }
+  #   quotas = {
+  #     requests_cpu    = "500m"
+  #     requests_memory = "1Gi"
+  #     limits_cpu      = "1000m"
+  #     limits_memory   = "2Gi"
+  #     pods            = 10
+  #     services        = 5
+  #     pvcs            = 2
+  #   }
+  # }
+}
+
+# Network and Security
+enable_network_policies = true
+
+# Role Assignment Configuration
+# Set to false to avoid permission issues during deployment
+create_role_assignments = false
+
+# System Node Pool (required for AKS)
+aks_system_node_count = 2
+aks_system_vm_size    = "Standard_D2s_v3"
+
+# User Node Pool (for application workloads)
+aks_user_node_count     = 3
+aks_user_node_min_count = 2
+aks_user_node_max_count = 10
+aks_user_vm_size        = "Standard_D4s_v3"
+
+# Network Configuration
+vnet_address_space           = ["10.224.0.0/12"]
+aks_subnet_address_prefix    = "10.224.0.0/16"
+appgw_subnet_address_prefix  = "10.225.0.0/24"
+aks_service_cidr            = "172.16.0.0/16"
+aks_dns_service_ip          = "172.16.0.10"
+
+# Feature Configuration
+enable_cluster_autoscaler = true
+enable_azure_policy      = true
+enable_log_analytics     = true
+log_analytics_retention_days = 30
+
+# Additional Security Variables
+enable_pod_security_standards = true
+default_pod_security_standard = "restricted"
+enable_workload_identity      = true
+enable_azure_rbac            = true
+
+# Application Gateway Configuration
+appgw_sku_name     = "Standard_v2"
+appgw_min_capacity = 1
+appgw_max_capacity = 3
+enable_waf         = false
+
+# Container Registry Configuration
+acr_sku           = "Standard"
+acr_admin_enabled = false
+
+# Scaling Configuration
+max_pods_per_node = 110
+
+# Network Security Configuration
+enable_private_cluster = false
+authorized_ip_ranges   = []

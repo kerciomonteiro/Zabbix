@@ -1,16 +1,25 @@
 name: Deploy AKS Zabbix Infrastructure (Terraform & ARM)
 
 on:
+  # Only run on manual trigger or when infrastructure files change
   push:
     branches: [ main, develop ]
+    paths:
+      - 'infra/**'
+      - 'k8s/**'
+      - '.github/workflows/**'
   pull_request:
     branches: [ main ]
+    paths:
+      - 'infra/**'
+      - 'k8s/**'
+      - '.github/workflows/**'
   workflow_dispatch:
     inputs:
       deployment_type:
         description: 'Type of deployment'
         required: true
-        default: 'full'
+        default: 'application-only'
         type: choice
         options:
         - full
@@ -51,7 +60,7 @@ env:
   AZURE_RESOURCE_GROUP: 'Devops-Test'
   AZURE_LOCATION: 'eastus'
   AZURE_SUBSCRIPTION_ID: 'd9b2a1cf-f99b-4f9e-a6cf-c79a078406bf'
-  DEPLOYMENT_TYPE: ${{ github.event.inputs.deployment_type || 'full' }}
+  DEPLOYMENT_TYPE: ${{ github.event.inputs.deployment_type || 'application-only' }}
   INFRASTRUCTURE_METHOD: ${{ github.event.inputs.infrastructure_method || 'terraform' }}
   FORCE_POWERSHELL: ${{ github.event.inputs.force_powershell || 'false' }}
   RESET_DATABASE: ${{ github.event.inputs.reset_database || 'false' }}

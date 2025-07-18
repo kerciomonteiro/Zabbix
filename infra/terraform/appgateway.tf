@@ -1,4 +1,6 @@
-# Application Gateway
+# Application Gateway for Multi-Application AKS Platform
+# This provides a default configuration that works with the AKS ingress controller
+# Applications can define their own ingress resources that will be managed by this gateway
 resource "azurerm_application_gateway" "main" {
   name                = local.resource_names.app_gateway
   resource_group_name = data.azurerm_resource_group.main.name
@@ -6,8 +8,8 @@ resource "azurerm_application_gateway" "main" {
   tags                = local.common_tags
 
   sku {
-    name = "Standard_v2"
-    tier = "Standard_v2"
+    name = var.appgw_sku_name
+    tier = var.appgw_sku_name
     # Note: For v2 SKUs, use either capacity OR autoscale_configuration, not both
     # We're using autoscale_configuration below, so capacity is omitted
   }
@@ -35,14 +37,14 @@ resource "azurerm_application_gateway" "main" {
     public_ip_address_id = azurerm_public_ip.appgw.id
   }
 
-  # Backend Address Pool
+  # Default Backend Address Pool (for AKS ingress controller)
   backend_address_pool {
-    name = "zabbix-backend-pool"
+    name = "aks-backend-pool"
   }
 
-  # Backend HTTP Settings
+  # Default Backend HTTP Settings
   backend_http_settings {
-    name                  = "zabbix-backend-http-settings"
+    name                  = "aks-backend-http-settings"
     cookie_based_affinity = "Disabled"
     path                  = "/"
     port                  = 80
@@ -50,21 +52,21 @@ resource "azurerm_application_gateway" "main" {
     request_timeout       = 60
   }
 
-  # HTTP Listener
+  # Default HTTP Listener
   http_listener {
-    name                           = "zabbix-http-listener"
+    name                           = "default-http-listener"
     frontend_ip_configuration_name = "appGwPublicFrontendIp"
     frontend_port_name             = "port_80"
     protocol                       = "Http"
   }
 
-  # Basic Request Routing Rule
+  # Default Request Routing Rule
   request_routing_rule {
-    name                       = "zabbix-routing-rule"
+    name                       = "default-routing-rule"
     rule_type                  = "Basic"
-    http_listener_name         = "zabbix-http-listener"
-    backend_address_pool_name  = "zabbix-backend-pool"
-    backend_http_settings_name = "zabbix-backend-http-settings"
+    http_listener_name         = "default-http-listener"
+    backend_address_pool_name  = "aks-backend-pool"
+    backend_http_settings_name = "aks-backend-http-settings"
     priority                   = 1
   }
 
@@ -76,15 +78,18 @@ resource "azurerm_application_gateway" "main" {
 
   # Autoscale Configuration
   autoscale_configuration {
-    min_capacity = 1
-    max_capacity = 3
+    min_capacity = var.appgw_min_capacity
+    max_capacity = var.appgw_max_capacity
   }
 
-  # WAF Configuration (optional, can be enabled later)
-  # waf_configuration {
-  #   enabled          = true
-  #   firewall_mode    = "Prevention"
-  #   rule_set_type    = "OWASP"
-  #   rule_set_version = "3.2"
-  # }
+  # WAF Configuration (conditional)
+  dynamic "waf_configuration" {
+    for_each = var.enable_waf && var.appgw_sku_name == "WAF_v2" ? [1] : []
+    content {
+      enabled          = true
+      firewall_mode    = "Prevention"
+      rule_set_type    = "OWASP"
+      rule_set_version = "3.2"
+    }
+  }
 }

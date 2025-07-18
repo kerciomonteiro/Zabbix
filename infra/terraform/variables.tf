@@ -1,4 +1,4 @@
-# Variables for Zabbix AKS Infrastructure Terraform deployment
+# Variables for Multi-Application AKS Infrastructure Terraform deployment
 
 variable "resource_group_name" {
   description = "Name of the Azure Resource Group"
@@ -157,4 +157,140 @@ variable "log_analytics_retention_days" {
     condition     = var.log_analytics_retention_days >= 30 && var.log_analytics_retention_days <= 730
     error_message = "Log Analytics retention must be between 30 and 730 days."
   }
+}
+
+# Variables for Application Insights
+variable "enable_application_insights" {
+  description = "Enable Application Insights for APM"
+  type        = bool
+  default     = true
+}
+
+variable "application_insights_retention_days" {
+  description = "Data retention period for Application Insights"
+  type        = number
+  default     = 90
+  
+  validation {
+    condition     = contains([30, 60, 90, 120, 180, 270, 365, 550, 730], var.application_insights_retention_days)
+    error_message = "Retention period must be one of: 30, 60, 90, 120, 180, 270, 365, 550, 730 days."
+  }
+}
+
+# Variables for Multi-Application Security
+variable "enable_pod_security_standards" {
+  description = "Enable Pod Security Standards for all namespaces"
+  type        = bool
+  default     = true
+}
+
+variable "default_pod_security_standard" {
+  description = "Default Pod Security Standard level"
+  type        = string
+  default     = "restricted"
+  
+  validation {
+    condition     = contains(["privileged", "baseline", "restricted"], var.default_pod_security_standard)
+    error_message = "Pod Security Standard must be one of: privileged, baseline, restricted."
+  }
+}
+
+variable "enable_workload_identity" {
+  description = "Enable Azure Workload Identity for secure pod authentication"
+  type        = bool
+  default     = true
+}
+
+variable "enable_azure_rbac" {
+  description = "Enable Azure RBAC for Kubernetes authorization"
+  type        = bool
+  default     = true
+}
+
+# Variables for Application Gateway
+variable "appgw_sku_name" {
+  description = "SKU name for Application Gateway"
+  type        = string
+  default     = "Standard_v2"
+  
+  validation {
+    condition     = contains(["Standard_v2", "WAF_v2"], var.appgw_sku_name)
+    error_message = "Application Gateway SKU must be Standard_v2 or WAF_v2."
+  }
+}
+
+variable "appgw_min_capacity" {
+  description = "Minimum capacity for Application Gateway autoscaling"
+  type        = number
+  default     = 1
+  
+  validation {
+    condition     = var.appgw_min_capacity >= 1 && var.appgw_min_capacity <= 10
+    error_message = "Application Gateway minimum capacity must be between 1 and 10."
+  }
+}
+
+variable "appgw_max_capacity" {
+  description = "Maximum capacity for Application Gateway autoscaling"
+  type        = number
+  default     = 3
+  
+  validation {
+    condition     = var.appgw_max_capacity >= 1 && var.appgw_max_capacity <= 125
+    error_message = "Application Gateway maximum capacity must be between 1 and 125."
+  }
+}
+
+variable "enable_waf" {
+  description = "Enable Web Application Firewall for Application Gateway"
+  type        = bool
+  default     = false
+}
+
+# Variables for Container Registry
+variable "acr_sku" {
+  description = "SKU tier for Azure Container Registry"
+  type        = string
+  default     = "Basic"
+  
+  validation {
+    condition     = contains(["Basic", "Standard", "Premium"], var.acr_sku)
+    error_message = "ACR SKU must be Basic, Standard, or Premium."
+  }
+}
+
+variable "acr_admin_enabled" {
+  description = "Enable admin user for Azure Container Registry"
+  type        = bool
+  default     = false
+}
+
+# Variables for Multi-Tenancy
+variable "enable_cluster_autoscaler" {
+  description = "Enable cluster autoscaler for the AKS cluster"
+  type        = bool
+  default     = true
+}
+
+variable "max_pods_per_node" {
+  description = "Maximum number of pods per node"
+  type        = number
+  default     = 110
+  
+  validation {
+    condition     = var.max_pods_per_node >= 10 && var.max_pods_per_node <= 250
+    error_message = "Maximum pods per node must be between 10 and 250."
+  }
+}
+
+variable "enable_private_cluster" {
+  description = "Enable private cluster for AKS (API server not accessible from internet)"
+  type        = bool
+  default     = false
+}
+
+variable "authorized_ip_ranges" {
+  description = "Authorized IP ranges for accessing the AKS API server (when not using private cluster)"
+  type        = list(string)
+  default     = []
 }
