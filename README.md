@@ -1,15 +1,19 @@
 # Zabbix Server on Azure Kubernetes Service (AKS)
 
-> **✅ Status: Production Ready** - All deployment issues resolved, infrastructure validated and tested
+> **✅ Status: FULLY OPERATIONAL** - All deployment issues resolved, 502 Bad Gateway fixed, Zabbix accessible via Application Gateway
+
+**Access URL**: http://dal2-devmon-mgt-devops.eastus.cloudapp.azure.com  
+**Credentials**: Admin / zabbix
 
 This repository contains the Infrastructure as Code (IaC) and Kubernetes manifests to deploy a complete Zabbix monitoring solution on Azure Kubernetes Service (AKS) with the following components:
 
-- **AKS Cluster** with system and worker node pools
-- **Zabbix Server** with MySQL database backend
-- **Zabbix Web Interface** with NGINX
-- **Application Gateway** for external access with SSL termination
-- **NGINX Ingress Controller** for internal routing
-- **Automated CI/CD** deployment via GitHub Actions
+- **AKS Cluster** with system and worker node pools ✅
+- **Zabbix Server** with MySQL database backend ✅
+- **Zabbix Web Interface** with NGINX ✅
+- **Application Gateway** for external access with SSL termination ✅
+- **AGIC (Application Gateway Ingress Controller)** properly configured ✅
+- **LoadBalancer Services** with HTTP health checks ✅
+- **Network Policies** allowing required traffic ✅
 
 ## 🔧 Infrastructure Deployment Methods
 
@@ -583,7 +587,56 @@ kubectl port-forward -n zabbix svc/zabbix-web 8080:80
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
-## 📞 Support
+## � Troubleshooting
+
+### Recent Issue Resolution: 502 Bad Gateway ✅
+
+**Status**: **RESOLVED** - Zabbix is now fully operational
+
+The deployment experienced and successfully resolved a 502 Bad Gateway issue. The complete troubleshooting process and solution are documented in:
+
+- **[502-BAD-GATEWAY-RESOLUTION.md](502-BAD-GATEWAY-RESOLUTION.md)** - Complete step-by-step troubleshooting
+- **[FINAL-ROOT-CAUSE-ANALYSIS.md](FINAL-ROOT-CAUSE-ANALYSIS.md)** - Detailed root cause analysis
+- **[applications/zabbix/k8s/TROUBLESHOOTING-SUMMARY.md](applications/zabbix/k8s/TROUBLESHOOTING-SUMMARY.md)** - Quick reference
+
+**Root Causes Identified and Fixed**:
+1. **AGIC Permissions** - Missing Network Contributor role on VNet/subnet
+2. **Network Policies** - Blocking traffic from kube-system namespace
+3. **LoadBalancer Health Checks** - Using TCP instead of HTTP probes
+4. **NSG Rules** - Missing rules for NodePort ranges
+
+**Key Learnings**:
+- Always check AGIC pod logs for permission errors
+- Network policies must allow kube-system traffic for AGIC
+- LoadBalancer services need proper HTTP health check annotations
+- NSG rules are required for NodePort access
+
+### Common Issues
+
+#### 1. 502 Bad Gateway
+- **Status**: ✅ RESOLVED
+- **Solution**: See documentation above
+
+#### 2. AGIC Not Starting
+```bash
+# Check AGIC logs
+kubectl logs -n kube-system -l app=ingress-appgw
+
+# Verify role assignments
+az role assignment list --assignee <agic-identity-id>
+```
+
+#### 3. Database Connection Issues
+```bash
+# Check database pod
+kubectl get pods -n zabbix
+kubectl logs zabbix-mysql-<pod-id> -n zabbix
+
+# Test database connectivity
+kubectl exec -it zabbix-server-<pod-id> -n zabbix -- mysql -h zabbix-mysql -u zabbix -p
+```
+
+## �📞 Support
 
 For issues and questions:
 - Create a GitHub issue

@@ -8,6 +8,7 @@
 *.tfstate
 *.tfstate.*
 *.tfvars
+tfplan
 # Note: .terraform.lock.hcl should be committed to ensure reproducible builds
 
 # Build outputs
