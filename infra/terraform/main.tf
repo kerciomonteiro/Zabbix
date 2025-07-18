@@ -45,6 +45,36 @@ import {
   id = "/subscriptions/d9b2a1cf-f99b-4f9e-a6cf-c79a078406bf/resourceGroups/Devops-Test/providers/Microsoft.ContainerService/managedClusters/aks-devops-eastus/agentPools/workerpool"
 }
 
+import {
+  to = azurerm_user_assigned_identity.aks
+  id = "/subscriptions/d9b2a1cf-f99b-4f9e-a6cf-c79a078406bf/resourceGroups/Devops-Test/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-devops-eastus"
+}
+
+import {
+  to = azurerm_log_analytics_workspace.main[0]
+  id = "/subscriptions/d9b2a1cf-f99b-4f9e-a6cf-c79a078406bf/resourceGroups/Devops-Test/providers/Microsoft.OperationalInsights/workspaces/law-devops-eastus"
+}
+
+import {
+  to = azurerm_network_security_group.aks
+  id = "/subscriptions/d9b2a1cf-f99b-4f9e-a6cf-c79a078406bf/resourceGroups/Devops-Test/providers/Microsoft.Network/networkSecurityGroups/nsg-aks-devops-eastus"
+}
+
+import {
+  to = azurerm_network_security_group.appgw
+  id = "/subscriptions/d9b2a1cf-f99b-4f9e-a6cf-c79a078406bf/resourceGroups/Devops-Test/providers/Microsoft.Network/networkSecurityGroups/nsg-appgw-devops-eastus"
+}
+
+import {
+  to = azurerm_virtual_network.main
+  id = "/subscriptions/d9b2a1cf-f99b-4f9e-a6cf-c79a078406bf/resourceGroups/Devops-Test/providers/Microsoft.Network/virtualNetworks/vnet-devops-eastus"
+}
+
+import {
+  to = azurerm_public_ip.appgw
+  id = "/subscriptions/d9b2a1cf-f99b-4f9e-a6cf-c79a078406bf/resourceGroups/Devops-Test/providers/Microsoft.Network/publicIPAddresses/pip-appgw-devops-eastus"
+}
+
 # Data sources for existing resources
 data "azurerm_resource_group" "main" {
   name = var.resource_group_name
