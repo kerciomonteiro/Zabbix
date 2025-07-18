@@ -107,6 +107,7 @@ resource "azurerm_kubernetes_cluster_node_pool" "user" {
   vnet_subnet_id        = azurerm_subnet.aks.id
   
   # Auto-scaling configuration
+  enable_auto_scaling = var.enable_auto_scaling
   node_count = var.enable_auto_scaling ? null : var.aks_user_node_count
   min_count  = var.enable_auto_scaling ? var.aks_user_node_min_count : null
   max_count  = var.enable_auto_scaling ? var.aks_user_node_max_count : null
