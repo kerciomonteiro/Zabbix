@@ -43,12 +43,12 @@ resource "kubernetes_resource_quota" "application_quotas" {
 
   spec {
     hard = {
-      "requests.cpu"    = each.value.quotas.requests_cpu
-      "requests.memory" = each.value.quotas.requests_memory
-      "limits.cpu"      = each.value.quotas.limits_cpu
-      "limits.memory"   = each.value.quotas.limits_memory
-      "pods"            = each.value.quotas.pods
-      "services"        = each.value.quotas.services
+      "requests.cpu"           = each.value.quotas.requests_cpu
+      "requests.memory"        = each.value.quotas.requests_memory
+      "limits.cpu"             = each.value.quotas.limits_cpu
+      "limits.memory"          = each.value.quotas.limits_memory
+      "pods"                   = each.value.quotas.pods
+      "services"               = each.value.quotas.services
       "persistentvolumeclaims" = each.value.quotas.pvcs
     }
   }
@@ -67,9 +67,9 @@ resource "kubernetes_network_policy" "namespace_isolation" {
 
   spec {
     pod_selector {}
-    
+
     policy_types = ["Ingress", "Egress"]
-    
+
     # Allow ingress from same namespace
     ingress {
       from {
@@ -80,7 +80,7 @@ resource "kubernetes_network_policy" "namespace_isolation" {
         }
       }
     }
-    
+
     # Allow ingress from ingress controller
     ingress {
       from {
@@ -91,7 +91,7 @@ resource "kubernetes_network_policy" "namespace_isolation" {
         }
       }
     }
-    
+
     # Allow egress to same namespace
     egress {
       to {
@@ -102,7 +102,7 @@ resource "kubernetes_network_policy" "namespace_isolation" {
         }
       }
     }
-    
+
     # Allow egress to kube-system for DNS
     egress {
       to {
@@ -117,10 +117,10 @@ resource "kubernetes_network_policy" "namespace_isolation" {
         port     = "53"
       }
     }
-    
+
     # Allow egress to internet (be more restrictive in production)
     egress {
-      to {}
+      # Allow egress to any destination (you can be more restrictive in production)
     }
   }
 
@@ -136,10 +136,10 @@ resource "kubernetes_storage_class" "workload_storage" {
   }
 
   storage_provisioner    = each.value.provisioner
-  parameters            = each.value.parameters
-  reclaim_policy        = each.value.reclaim_policy
+  parameters             = each.value.parameters
+  reclaim_policy         = each.value.reclaim_policy
   allow_volume_expansion = true
-  volume_binding_mode   = "WaitForFirstConsumer"
+  volume_binding_mode    = "WaitForFirstConsumer"
 
   depends_on = [azurerm_kubernetes_cluster.main]
 }
@@ -155,9 +155,9 @@ resource "kubernetes_labels" "pod_security_standards" {
   }
 
   labels = {
-    "pod-security.kubernetes.io/enforce" = var.default_pod_security_standard
-    "pod-security.kubernetes.io/audit"   = var.default_pod_security_standard
-    "pod-security.kubernetes.io/warn"    = var.default_pod_security_standard
+    "pod-security.kubernetes.io/enforce" = lookup(var.application_namespaces[each.key], "pod_security_standard", var.default_pod_security_standard)
+    "pod-security.kubernetes.io/audit"   = lookup(var.application_namespaces[each.key], "pod_security_standard", var.default_pod_security_standard)
+    "pod-security.kubernetes.io/warn"    = lookup(var.application_namespaces[each.key], "pod_security_standard", var.default_pod_security_standard)
   }
 
   depends_on = [kubernetes_namespace.applications]

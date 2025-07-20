@@ -39,7 +39,8 @@ provider "azurerm" {
 provider "azuread" {
 }
 
-# Import blocks have been resolved - resources are now in Terraform state
+# All resources have been successfully imported into Terraform state
+# Import blocks removed after successful import
 
 # Data sources for existing resources
 data "azurerm_resource_group" "main" {
@@ -51,22 +52,22 @@ data "azurerm_client_config" "current" {}
 # Local variables for naming convention: resourcename-devops-regionname
 locals {
   devops_naming_suffix = "devops-${var.location}"
-  
+
   resource_names = {
-    vnet                = "vnet-${local.devops_naming_suffix}"
-    aks_cluster         = "aks-${local.devops_naming_suffix}"
-    aks_node_rg         = "rg-${var.environment_name}-aks-nodes-${local.devops_naming_suffix}"
-    aks_subnet          = "subnet-aks-${local.devops_naming_suffix}"
-    appgw_subnet        = "subnet-appgw-${local.devops_naming_suffix}"
-    identity            = "id-${local.devops_naming_suffix}"
-    log_analytics       = "law-${local.devops_naming_suffix}"
-    container_registry  = "acrdevops${lower(var.location)}"
-    app_gateway         = "appgw-${local.devops_naming_suffix}"
-    public_ip           = "pip-appgw-${local.devops_naming_suffix}"
-    nsg_aks             = "nsg-aks-${local.devops_naming_suffix}"
-    nsg_appgw           = "nsg-appgw-${local.devops_naming_suffix}"
+    vnet               = "vnet-${local.devops_naming_suffix}"
+    aks_cluster        = "aks-${local.devops_naming_suffix}"
+    aks_node_rg        = "rg-zabbix-devops-eastus-aks-nodes-devops-eastus"
+    aks_subnet         = "subnet-aks-${local.devops_naming_suffix}"
+    appgw_subnet       = "subnet-appgw-${local.devops_naming_suffix}"
+    identity           = "id-${local.devops_naming_suffix}"
+    log_analytics      = "law-${local.devops_naming_suffix}"
+    container_registry = "acrdevops${lower(var.location)}"
+    app_gateway        = "appgw-${local.devops_naming_suffix}"
+    public_ip          = "pip-appgw-${local.devops_naming_suffix}"
+    nsg_aks            = "nsg-aks-${local.devops_naming_suffix}"
+    nsg_appgw          = "nsg-appgw-${local.devops_naming_suffix}"
   }
-  
+
   common_tags = {
     "azd-env-name" = var.environment_name
     "environment"  = var.environment_name

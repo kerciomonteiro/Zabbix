@@ -1,0 +1,29 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: zabbix-db-init-fixed
+  namespace: zabbix
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: init-db
+        image: mysql:8.0
+        command: ["/bin/bash", "/init-db.sh"]
+        volumeMounts:
+        - name: init-script
+          mountPath: /init-db.sh
+          subPath: init-db.sh
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+      volumes:
+      - name: init-script
+        configMap:
+          name: zabbix-init-script
+          defaultMode: 0755

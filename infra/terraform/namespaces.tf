@@ -67,29 +67,29 @@ variable "application_namespaces" {
 variable "storage_classes" {
   description = "Storage classes for different application needs"
   type = map(object({
-    name          = string
-    provisioner   = string
-    parameters    = map(string)
+    name           = string
+    provisioner    = string
+    parameters     = map(string)
     reclaim_policy = string
   }))
   default = {
     fast = {
-      name          = "fast-ssd"
-      provisioner   = "disk.csi.azure.com"
+      name        = "fast-ssd"
+      provisioner = "disk.csi.azure.com"
       parameters = {
         storageaccounttype = "Premium_LRS"
-        kind              = "Managed"
-        cachingmode       = "ReadOnly"
+        kind               = "Managed"
+        cachingmode        = "ReadOnly"
       }
       reclaim_policy = "Retain"
     }
     standard = {
-      name          = "standard-ssd"
-      provisioner   = "disk.csi.azure.com"
+      name        = "standard-ssd"
+      provisioner = "disk.csi.azure.com"
       parameters = {
         storageaccounttype = "StandardSSD_LRS"
-        kind              = "Managed"
-        cachingmode       = "ReadOnly"
+        kind               = "Managed"
+        cachingmode        = "ReadOnly"
       }
       reclaim_policy = "Delete"
     }

@@ -7,23 +7,23 @@ resource "azurerm_kubernetes_cluster" "main" {
   kubernetes_version  = var.kubernetes_version
   node_resource_group = local.resource_names.aks_node_rg
   tags                = local.common_tags
-  
+
   # Set SKU tier to match existing cluster (Free tier)
   sku_tier = "Free"
 
   # System Node Pool (required)
   default_node_pool {
-    name               = "systempool"
-    node_count         = var.aks_system_node_count
-    vm_size            = var.aks_system_vm_size
-    os_disk_size_gb    = 128
-    os_disk_type       = "Managed"
-    vnet_subnet_id     = azurerm_subnet.aks.id
-    max_pods           = var.max_pods_per_node
-    
+    name            = "systempool"
+    node_count      = var.aks_system_node_count
+    vm_size         = var.aks_system_vm_size
+    os_disk_size_gb = 128
+    os_disk_type    = "Managed"
+    vnet_subnet_id  = azurerm_subnet.aks.id
+    max_pods        = var.max_pods_per_node
+
     # System node pool should be in zones for HA (eastus supports zones 2,3)
     zones = ["2", "3"]
-    
+
     # Node labels for system workloads
     node_labels = {
       "workload-type" = "system"
@@ -42,12 +42,12 @@ resource "azurerm_kubernetes_cluster" "main" {
 
   # Network Configuration
   network_profile {
-    network_plugin     = "azure"
-    network_policy     = "azure"
-    outbound_type      = "loadBalancer"
-    service_cidr       = var.aks_service_cidr
-    dns_service_ip     = var.aks_dns_service_ip
-    load_balancer_sku  = "standard"
+    network_plugin    = "azure"
+    network_policy    = "azure"
+    outbound_type     = "loadBalancer"
+    service_cidr      = var.aks_service_cidr
+    dns_service_ip    = var.aks_dns_service_ip
+    load_balancer_sku = "standard"
   }
 
   # API Server Configuration
@@ -77,8 +77,8 @@ resource "azurerm_kubernetes_cluster" "main" {
   # Security Profile
   # Workload Identity is enabled for enhanced security
   workload_identity_enabled = var.enable_workload_identity
-  oidc_issuer_enabled      = var.enable_workload_identity
-  
+  oidc_issuer_enabled       = var.enable_workload_identity
+
   # Azure RBAC for Kubernetes authorization
   role_based_access_control_enabled = var.enable_azure_rbac
 
@@ -111,19 +111,19 @@ resource "azurerm_kubernetes_cluster_node_pool" "user" {
   os_disk_size_gb       = 128
   os_disk_type          = "Managed"
   vnet_subnet_id        = azurerm_subnet.aks.id
-  
+
   # Auto-scaling configuration
   enable_auto_scaling = var.enable_cluster_autoscaler
-  node_count = var.enable_cluster_autoscaler ? null : var.aks_user_node_count
-  min_count  = var.enable_cluster_autoscaler ? var.aks_user_node_min_count : null
-  max_count  = var.enable_cluster_autoscaler ? var.aks_user_node_max_count : null
-  
+  node_count          = var.enable_cluster_autoscaler ? null : var.aks_user_node_count
+  min_count           = var.enable_cluster_autoscaler ? var.aks_user_node_min_count : null
+  max_count           = var.enable_cluster_autoscaler ? var.aks_user_node_max_count : null
+
   # High availability across zones (eastus supports zones 2,3)
   zones = ["2", "3"]
-  
+
   # Node configuration
   max_pods = var.max_pods_per_node
-  
+
   # Node labels for workload identification
   node_labels = {
     "workload-type" = "application"

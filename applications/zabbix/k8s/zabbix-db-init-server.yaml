@@ -1,0 +1,89 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: zabbix-db-init-server
+  namespace: zabbix
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: zabbix-db-init
+        image: zabbix/zabbix-server-mysql:6.0-ubuntu-latest
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        env:
+        - name: DB_SERVER_HOST
+          value: "zabbix-mysql"
+        - name: DB_SERVER_PORT
+          value: "3306"
+        - name: DB_SERVER_DBNAME
+          value: "zabbix"
+        - name: MYSQL_USER
+          value: "zabbix"
+        - name: MYSQL_PASSWORD
+          value: "ZabbixPass123!"
+        - name: MYSQL_ROOT_PASSWORD
+          value: "ZabbixRoot123!"
+        - name: ZBX_DONTSTART
+          value: "true"
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -e
+          echo "Starting Zabbix database initialization using server container..."
+          
+          # Wait for MySQL to be ready
+          echo "Waiting for MySQL to be ready..."
+          until mysql -h "${DB_SERVER_HOST}" -P "${DB_SERVER_PORT}" -u root -p"${MYSQL_ROOT_PASSWORD}" -e 'SELECT 1' >/dev/null 2>&1; do
+            echo "MySQL is not ready yet, waiting..."
+            sleep 5
+          done
+          echo "MySQL is ready!"
+          
+          # Drop and recreate database
+          echo "Recreating database..."
+          mysql -h "${DB_SERVER_HOST}" -P "${DB_SERVER_PORT}" -u root -p"${MYSQL_ROOT_PASSWORD}" -e "DROP DATABASE IF EXISTS zabbix; CREATE DATABASE zabbix CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;"
+          
+          # Create user and grant permissions
+          echo "Creating Zabbix user..."
+          mysql -h "${DB_SERVER_HOST}" -P "${DB_SERVER_PORT}" -u root -p"${MYSQL_ROOT_PASSWORD}" -e "CREATE USER IF NOT EXISTS 'zabbix'@'%' IDENTIFIED BY '${MYSQL_PASSWORD}';"
+          echo "Granting permissions..."
+          mysql -h "${DB_SERVER_HOST}" -P "${DB_SERVER_PORT}" -u root -p"${MYSQL_ROOT_PASSWORD}" -e "GRANT ALL PRIVILEGES ON zabbix.* TO 'zabbix'@'%'; FLUSH PRIVILEGES;"
+          
+          # Initialize schema using the built-in schema files
+          echo "Initializing Zabbix schema..."
+          echo "Looking for schema files..."
+          find /usr -name "*.sql*" -type f | head -20
+          
+          # Import schema - check multiple possible locations
+          if [ -f "/usr/share/zabbix-sql-scripts/mysql/server.sql.gz" ]; then
+            echo "Importing server schema..."
+            zcat /usr/share/zabbix-sql-scripts/mysql/server.sql.gz | mysql -h "${DB_SERVER_HOST}" -P "${DB_SERVER_PORT}" -u zabbix -p"${MYSQL_PASSWORD}" zabbix
+          elif [ -f "/usr/share/doc/zabbix-sql-scripts/mysql/server.sql.gz" ]; then
+            echo "Importing server schema from alternative location..."
+            zcat /usr/share/doc/zabbix-sql-scripts/mysql/server.sql.gz | mysql -h "${DB_SERVER_HOST}" -P "${DB_SERVER_PORT}" -u zabbix -p"${MYSQL_PASSWORD}" zabbix
+          elif [ -f "/usr/share/doc/zabbix-server-mysql/create.sql.gz" ]; then
+            echo "Importing server schema from create.sql.gz..."
+            zcat /usr/share/doc/zabbix-server-mysql/create.sql.gz | mysql -h "${DB_SERVER_HOST}" -P "${DB_SERVER_PORT}" -u zabbix -p"${MYSQL_PASSWORD}" zabbix
+          else
+            echo "ERROR: Could not find Zabbix schema files"
+            exit 1
+          fi
+          echo "Verifying database initialization..."
+          table_count=$(mysql -h "${DB_SERVER_HOST}" -P "${DB_SERVER_PORT}" -u zabbix -p"${MYSQL_PASSWORD}" -e "USE zabbix; SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='zabbix';" --skip-column-names)
+          echo "Found $table_count tables in database"
+          
+          if [ "$table_count" -gt 100 ]; then
+            echo "Database initialization completed successfully!"
+            mysql -h "${DB_SERVER_HOST}" -P "${DB_SERVER_PORT}" -u zabbix -p"${MYSQL_PASSWORD}" -e "USE zabbix; SELECT COUNT(*) as user_count FROM users;"
+          else
+            echo "ERROR: Database initialization may have failed - only $table_count tables found"
+            exit 1
+          fi

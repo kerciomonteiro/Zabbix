@@ -6,6 +6,7 @@ resource "azurerm_application_gateway" "main" {
   resource_group_name = data.azurerm_resource_group.main.name
   location            = var.location
   tags                = local.common_tags
+  zones               = ["1", "2", "3"]
 
   sku {
     name = var.appgw_sku_name
