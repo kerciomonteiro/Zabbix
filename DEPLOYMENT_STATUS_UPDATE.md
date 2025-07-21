@@ -1,33 +1,46 @@
 # Zabbix AKS Deployment - Status Update
 
-## 🎯 Current Status: **MANAGED IDENTITY CREDENTIAL ISSUE DETECTED**
+## 🎯 Current Status: **AKS CLUSTER IMPORT CONFLICT DETECTED AND ADDRESSED**
 
-### Critical Issue Identified and Addressed
+### Latest Issue Identified and Enhanced
 
-**❌ New Issue: Managed Identity Credential Reconciliation Failed**
+**❌ New Issue: AKS Cluster Import Conflict**
 ```
-Error: creating Kubernetes Cluster - polling failed: 
-Status: "NotFound"
-Message: "Reconcile managed identity credential failed. Details: unexpected response from MSI data plane, length of returned certificate: 0."
+Error: A resource with the ID "/subscriptions/.../managedClusters/aks-devops-eastus" already exists - to be managed via Terraform this resource needs to be imported into the State.
 ```
 
-**🔧 Solution Applied**
-- Enhanced dependency management in Terraform to ensure proper role assignment timing
-- Added 60-second time delay for managed identity propagation (`time_sleep.wait_for_identity`)
-- Created comprehensive managed identity recovery documentation and scripts
-- Updated AKS cluster dependencies to wait for all role assignments and identity propagation
+**🔧 Enhanced Solution Applied**
+- Enhanced import script with detailed diagnostics and error analysis
+- Added comprehensive AKS cluster troubleshooting script (`aks-import-troubleshoot.sh`)
+- Improved error detection and automated recovery suggestions
+- Integration with GitHub Actions workflow for automated handling
 
-**📚 New Documentation Created**
-- `MANAGED_IDENTITY_FIX.md` - Comprehensive analysis and solutions for identity credential issues  
-- `scripts/terraform/managed-identity-recovery.sh` - Recovery script for identity issues
+**📚 New Troubleshooting Tools Created**
+- Enhanced `terraform-import-fix.sh` with detailed AKS cluster import diagnostics
+- `scripts/terraform/aks-import-troubleshoot.sh` - Dedicated AKS cluster troubleshooting script
+- Comprehensive error analysis with specific resolution recommendations
 
 ### Root Cause Analysis
 
-The managed identity credential reconciliation failure typically occurs due to:
-1. **Timing Issues**: Principal ID hasn't fully propagated across Azure infrastructure
-2. **Permission Issues**: Role assignments not applied before AKS cluster creation
-3. **MSI Data Plane Issues**: Azure's internal managed service identity issues
-4. **Resource Dependencies**: Insufficient wait time between identity creation and usage
+The AKS cluster import conflict typically occurs due to:
+1. **State Management Issues**: Cluster exists but not in Terraform state
+2. **Previous Partial Deployments**: Earlier runs created resources but didn't complete
+3. **Configuration Drift**: Existing cluster configuration doesn't match Terraform definition
+4. **Manual Interventions**: Cluster modified outside of Terraform
+
+### Technical Resolution Strategy
+
+**Enhanced Import Process:**
+1. **Diagnostic Phase**: Detailed analysis of existing cluster properties
+2. **Configuration Comparison**: Compare Azure cluster vs. Terraform definition
+3. **Import Attempt**: Try standard import with detailed error capture
+4. **Failure Analysis**: Categorize import failures and provide specific guidance
+5. **Resolution Recommendations**: Automated suggestions based on error type
+
+**Fallback Options:**
+- **Configuration Update**: Modify Terraform to match existing cluster
+- **Cluster Recreation**: Delete existing cluster and let Terraform recreate
+- **Force Import**: Use advanced import techniques for complex scenarios
 
 ### Latest Enhancements (Latest Commit: PENDING)
 

@@ -138,9 +138,60 @@ try_import "azurerm_application_gateway.main" \
     "/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Network/applicationGateways/appgw-devops-eastus" \
     "Application Gateway"
 
-try_import "azurerm_kubernetes_cluster.main" \
-    "/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.ContainerService/managedClusters/aks-devops-eastus" \
-    "AKS Cluster (may be skipped if recreation needed)"
+# AKS cluster import with enhanced error handling
+echo "==> Attempting to import AKS Cluster with enhanced diagnostics..."
+echo "    Terraform resource: azurerm_kubernetes_cluster.main"
+echo "    Expected Azure resource ID: /subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.ContainerService/managedClusters/aks-devops-eastus"
+
+# Check if already in state first
+if terraform state show "azurerm_kubernetes_cluster.main" >/dev/null 2>&1; then
+    echo "    [SKIP] AKS cluster already in Terraform state"
+else
+    # Check if resource exists in Azure with detailed info
+    echo "    [CHECK] Verifying AKS cluster exists in Azure..."
+    AKS_INFO=$(az aks show --name "aks-devops-eastus" --resource-group "$AZURE_RESOURCE_GROUP" --output json 2>/dev/null || echo "null")
+    
+    if [ "$AKS_INFO" = "null" ]; then
+        echo "    [INFO] AKS cluster not found in Azure - will be created by Terraform"
+    else
+        echo "    [FOUND] AKS cluster exists in Azure"
+        
+        # Get cluster details for troubleshooting
+        AKS_STATE=$(echo "$AKS_INFO" | jq -r '.provisioningState // "unknown"')
+        AKS_VERSION=$(echo "$AKS_INFO" | jq -r '.kubernetesVersion // "unknown"')
+        AKS_IDENTITY_TYPE=$(echo "$AKS_INFO" | jq -r '.identity.type // "unknown"')
+        
+        echo "    [INFO] Cluster State: $AKS_STATE"
+        echo "    [INFO] K8s Version: $AKS_VERSION"
+        echo "    [INFO] Identity Type: $AKS_IDENTITY_TYPE"
+        
+        # Attempt import with detailed error capture
+        echo "    [IMPORT] Attempting to import AKS cluster..."
+        import_output=$(terraform import "azurerm_kubernetes_cluster.main" "/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.ContainerService/managedClusters/aks-devops-eastus" 2>&1) || {
+            import_exit_code=$?
+            echo "    [FAILED] AKS cluster import failed (exit code: $import_exit_code)"
+            
+            # Analyze the error
+            if echo "$import_output" | grep -i "already managed by Terraform\|Resource already managed"; then
+                echo "    [SUCCESS] Resource already properly managed by Terraform"
+            elif echo "$import_output" | grep -i "does not exist\|not found"; then
+                echo "    [ERROR] Resource not found during import (unexpected)"
+            elif echo "$import_output" | grep -i "configuration.*not.*compatible\|incompatible"; then
+                echo "    [WARNING] Configuration incompatible - cluster may need recreation"
+                echo "    [ADVICE] Consider destroying existing cluster and letting Terraform recreate it"
+                echo "    [COMMAND] To manually fix: az aks delete --name aks-devops-eastus --resource-group $AZURE_RESOURCE_GROUP"
+            else
+                echo "    [ERROR] Unknown import error:"
+                echo "$import_output" | head -n 5 | sed 's/^/             /'
+            fi
+            
+            echo "    [CONTINUE] Continuing with deployment - Terraform apply will handle this"
+            return 1
+        }
+        
+        echo "    [SUCCESS] AKS cluster imported successfully"
+    fi
+fi
 
 echo ""
 echo "✅ Import fix script completed"

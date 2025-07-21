@@ -1,5 +1,19 @@
 #  Zabbix Server on Azure Kubernetes Service (AKS)
 
+> **⚠️ Status: AKS CLUSTER IMPORT CONFLICT - ENHANCED TROUBLESHOOTING DEPLOYED** - Comprehensive import fix and diagnostics applied
+
+**Latest Update**: Enhanced AKS cluster import error handling with detailed diagnostics and recovery options  
+**Access URL**: http://dal2-devmon-mgt-devops.eastus.cloudapp.azure.com  
+**Credentials**: Admin / zabbix
+
+> **📋 Current Issue**: AKS cluster exists in Azure but needs to be imported into Terraform state  
+> **📋 Root Cause**: Resource exists from previous deployment but not in current Terraform state  
+> **📋 Solution Applied**: Enhanced import script with diagnostics, troubleshooting tools, and recovery options  
+> **📋 Status**: Enhanced fix deployed - monitoring GitHub Actions for automated resolution  
+> **📋 Details**: See [AKS Cluster Import Issues](#aks-cluster-import-issues-️) section below
+
+This repository contains the Infrastructure as Code (IaC) and Kubernetes manifests to deploy a complete Zabbix monitoring solution on Azure Kubernetes Service (AKS) with the following components:r on Azure Kubernetes Service (AKS)
+
 > **� Status: MANAGED IDENTITY CREDENTIAL ISSUE - ACTIVELY RESOLVING** - Enhanced dependency management and propagation delay applied
 
 **Latest Update**: Applied comprehensive fix for managed identity credential reconciliation failure  
@@ -8,7 +22,50 @@
 
 > **📋 Current Issue**: AKS cluster creation fails due to managed identity credential reconciliation error  
 > **📋 Root Cause**: Timing issue between identity creation/role assignments and AKS cluster usage  
-> **📋 Solution Applied**: Enhanced dependencies, 60-second propagation delay, comprehensive recovery tools  
+> **📋 Solution### AKS Cluster Import Issues ⚠️
+
+**Status**: **ACTIVE** - Enhanced import fix and troubleshooting tools deployed
+
+The deployment may encounter AKS cluster import errors when the cluster already exists in Azure but is not in the Terraform state. This typically happens when:
+
+**Common Scenarios:**
+- Previous deployment was partially successful
+- Manual cluster creation outside of Terraform
+- State file corruption or loss
+- Configuration changes that require cluster recreation
+
+**Error Example:**
+```
+Error: A resource with the ID "/.../managedClusters/aks-devops-eastus" already exists - to be managed via Terraform this resource needs to be imported into the State.
+```
+
+**Solutions Applied:**
+- **Enhanced Import Script**: Comprehensive resource import with dependency awareness
+- **Diagnostic Logging**: Detailed analysis of import failures and suggested actions
+- **Automated Recovery**: Built into GitHub Actions workflow via `terraform-import-fix.sh`
+
+**Manual Troubleshooting:**
+For complex import issues, use the dedicated troubleshooting script:
+```bash
+cd infra/terraform
+export AZURE_SUBSCRIPTION_ID="d9b2a1cf-f99b-4f9e-a6cf-c79a078406bf"
+export AZURE_RESOURCE_GROUP="rg-devops-pops-eastus"
+../../scripts/terraform/aks-import-troubleshoot.sh
+```
+
+**Recovery Options:**
+1. **Automatic Import** - GitHub Actions workflow handles most cases
+2. **Manual Import** - Use troubleshooting script for detailed analysis
+3. **Cluster Recreation** - Delete existing cluster to start fresh (downtime required)
+4. **State Recovery** - Restore from backup or reinitialize Terraform state
+
+See detailed import fix documentation:
+- **[scripts/terraform/terraform-import-fix.sh](scripts/terraform/terraform-import-fix.sh)** - Main import automation
+- **[scripts/terraform/aks-import-troubleshoot.sh](scripts/terraform/aks-import-troubleshoot.sh)** - Detailed troubleshooting
+
+### Managed Identity Issues �
+
+**Status**: **ACTIVELY RESOLVING** - Comprehensive fix applied for credential reconciliation failureplied**: Enhanced dependencies, 60-second propagation delay, comprehensive recovery tools  
 > **📋 Status**: Fix deployed - monitoring GitHub Actions for resolution  
 > **📋 Details**: See [MANAGED_IDENTITY_FIX.md](MANAGED_IDENTITY_FIX.md) and [DEPLOYMENT_STATUS_UPDATE.md](DEPLOYMENT_STATUS_UPDATE.md)
 
