@@ -622,6 +622,14 @@ The workflow now uses the modern Azure CLI AKS addon method for installing Appli
 - LoadBalancer services need proper HTTP health check annotations
 - NSG rules are required for NodePort access
 
+### Terraform Import Issues ✅
+
+**Status**: **RESOLVED** - Automatic import resolution implemented
+
+Enhanced import handling prevents conflicts when Azure resources already exist but aren't in Terraform state. The deployment workflow includes automatic detection and import of critical resources. See:
+
+- **[TERRAFORM_IMPORT_RESOLUTION.md](TERRAFORM_IMPORT_RESOLUTION.md)** - Complete import error resolution guide
+
 ### AKS Node Resource Group Naming ✅
 
 **Status**: **RESOLVED** - Consistent naming pattern implemented
