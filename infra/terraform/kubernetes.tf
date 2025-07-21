@@ -12,7 +12,10 @@ resource "kubernetes_namespace" "applications" {
     annotations = each.value.annotations
   }
 
-  depends_on = [azurerm_kubernetes_cluster.main]
+  depends_on = [
+    azurerm_kubernetes_cluster.main,
+    time_sleep.wait_for_cluster
+  ]
 }
 
 # Create resource quotas for each namespace
@@ -36,7 +39,10 @@ resource "kubernetes_resource_quota" "application_quotas" {
     }
   }
 
-  depends_on = [kubernetes_namespace.applications]
+  depends_on = [
+    kubernetes_namespace.applications,
+    time_sleep.wait_for_cluster
+  ]
 }
 
 # Create network policies for namespace isolation
@@ -107,7 +113,10 @@ resource "kubernetes_network_policy" "namespace_isolation" {
     }
   }
 
-  depends_on = [kubernetes_namespace.applications]
+  depends_on = [
+    kubernetes_namespace.applications,
+    time_sleep.wait_for_cluster
+  ]
 }
 
 # Create storage classes for different workload types
@@ -124,7 +133,10 @@ resource "kubernetes_storage_class" "workload_storage" {
   allow_volume_expansion = true
   volume_binding_mode    = "WaitForFirstConsumer"
 
-  depends_on = [azurerm_kubernetes_cluster.main]
+  depends_on = [
+    azurerm_kubernetes_cluster.main,
+    time_sleep.wait_for_cluster
+  ]
 }
 
 # Pod Security Standards Labels for namespaces
@@ -143,5 +155,8 @@ resource "kubernetes_labels" "pod_security_standards" {
     "pod-security.kubernetes.io/warn"    = lookup(var.application_namespaces[each.key], "pod_security_standard", var.default_pod_security_standard)
   }
 
-  depends_on = [kubernetes_namespace.applications]
+  depends_on = [
+    kubernetes_namespace.applications,
+    time_sleep.wait_for_cluster
+  ]
 }

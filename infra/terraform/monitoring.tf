@@ -32,48 +32,52 @@ resource "azurerm_container_registry" "main" {
 # This extends the monitoring capabilities for multiple applications
 
 # Azure Monitor and Container Insights
-resource "azurerm_monitor_diagnostic_setting" "aks_diagnostics" {
-  name                       = "aks-diagnostics"
-  target_resource_id         = azurerm_kubernetes_cluster.main.id
-  log_analytics_workspace_id = azurerm_log_analytics_workspace.main[0].id
+# Note: Diagnostic settings are automatically created by Container Insights (oms_agent)
+# when enabled in the AKS cluster configuration. No explicit diagnostic setting needed.
 
-  # Enable all available log categories
-  enabled_log {
-    category = "kube-apiserver"
-  }
-
-  enabled_log {
-    category = "kube-controller-manager"
-  }
-
-  enabled_log {
-    category = "kube-scheduler"
-  }
-
-  enabled_log {
-    category = "kube-audit"
-  }
-
-  enabled_log {
-    category = "kube-audit-admin"
-  }
-
-  enabled_log {
-    category = "guard"
-  }
-
-  enabled_log {
-    category = "cluster-autoscaler"
-  }
-
-  # Enable metrics
-  metric {
-    category = "AllMetrics"
-    enabled  = true
-  }
-
-  depends_on = [azurerm_kubernetes_cluster.main]
-}
+# Commented out to prevent conflict with auto-created diagnostic setting
+# resource "azurerm_monitor_diagnostic_setting" "aks_diagnostics" {
+#   name                       = "aks-diagnostics"
+#   target_resource_id         = azurerm_kubernetes_cluster.main.id
+#   log_analytics_workspace_id = azurerm_log_analytics_workspace.main[0].id
+#
+#   # Enable all available log categories
+#   enabled_log {
+#     category = "kube-apiserver"
+#   }
+#
+#   enabled_log {
+#     category = "kube-controller-manager"
+#   }
+#
+#   enabled_log {
+#     category = "kube-scheduler"
+#   }
+#
+#   enabled_log {
+#     category = "kube-audit"
+#   }
+#
+#   enabled_log {
+#     category = "kube-audit-admin"
+#   }
+#
+#   enabled_log {
+#     category = "guard"
+#   }
+#
+#   enabled_log {
+#     category = "cluster-autoscaler"
+#   }
+#
+#   # Enable metrics
+#   metric {
+#     category = "AllMetrics"
+#     enabled  = true
+#   }
+#
+#   depends_on = [azurerm_kubernetes_cluster.main]
+# }
 
 # Container Insights solution
 resource "azurerm_log_analytics_solution" "container_insights" {
