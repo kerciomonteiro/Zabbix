@@ -277,65 +277,94 @@ jobs:
         az resource list --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" --output table || echo "⚠️ Failed to list resources"
         
         # Skip complex resource discovery - we know the exact resource names
-        echo "� Using known resource names for import..."
+        echo ">> Using known resource names for import..."
         
         # Import resources - simplified approach with better error handling
-        echo "📦 Importing resources using a simplified, robust approach..."
+        echo ">> Importing resources using a simplified, robust approach..."
         
-        # Function to safely import a resource with improved error handling
+        # Function to safely import a resource with improved error handling and full diagnostics
         safe_import() {
             local tf_resource="$1"
             local azure_id="$2"
             local display_name="$3"
             
             echo ""
-            echo "� Processing $display_name..."
-            echo "   Terraform resource: $tf_resource"
-            echo "   Azure resource ID: $azure_id"
+            echo "==> Processing $display_name..."
+            echo "    Terraform resource: $tf_resource"
+            echo "    Azure resource ID: $azure_id"
             
             # Check if resource is already in Terraform state
             if terraform state show "$tf_resource" >/dev/null 2>&1; then
-                echo "   ℹ️ Resource already in Terraform state - verifying..."
+                echo "    [INFO] Resource already in Terraform state - verifying..."
                 # Get the actual ID from Terraform state (different approach)
                 local current_id=""
                 current_id=$(terraform state show "$tf_resource" 2>/dev/null | grep -E '^\s*id\s*=' | head -1 | sed -E 's/.*=\s*"([^"]+)".*/\1/' || echo "")
                 
                 if [ -n "$current_id" ] && [ "$current_id" = "$azure_id" ]; then
-                    echo "   ✅ $display_name already correctly imported"
+                    echo "    [SUCCESS] $display_name already correctly imported"
                     return 0
                 else
-                    echo "   ⚠️ State exists but may point to different resource or be corrupted"
-                    echo "      Current ID in state: $current_id"
-                    echo "      Expected ID: $azure_id"
-                    echo "      Removing and re-importing..."
-                    terraform state rm "$tf_resource" >/dev/null 2>&1 || echo "      Note: Failed to remove from state (might not exist)"
+                    echo "    [WARNING] State exists but may point to different resource or be corrupted"
+                    echo "              Current ID in state: $current_id"
+                    echo "              Expected ID: $azure_id"
+                    echo "              Removing and re-importing..."
+                    terraform state rm "$tf_resource" >/dev/null 2>&1 || echo "              Note: Failed to remove from state (might not exist)"
                 fi
             fi
             
             # Verify the Azure resource exists
-            echo "   🔍 Verifying resource exists in Azure..."
+            echo "    [CHECK] Verifying resource exists in Azure..."
             if ! az resource show --ids "$azure_id" >/dev/null 2>&1; then
-                echo "   ❌ Resource not found in Azure - skipping import"
+                echo "    [ERROR] Resource not found in Azure - skipping import"
                 return 1
             fi
-            echo "   ✅ Resource verified in Azure"
+            echo "    [SUCCESS] Resource verified in Azure"
             
-            # Attempt the import
-            echo "   � Importing $display_name into Terraform state..."
+            # Attempt the import with detailed output capture
+            echo "    [IMPORT] Importing $display_name into Terraform state..."
             local import_output=""
-            if import_output=$(terraform import "$tf_resource" "$azure_id" 2>&1); then
-                echo "   ✅ Successfully imported $display_name"
+            local import_exit_code=0
+            
+            # Capture full output and exit code
+            import_output=$(terraform import "$tf_resource" "$azure_id" 2>&1) || import_exit_code=$?
+            
+            # Analyze the output to determine success/failure
+            local import_success=false
+            if [ $import_exit_code -eq 0 ]; then
+                # Check for success indicators in output
+                if echo "$import_output" | grep -q "Import successful\|successfully imported\|Import prepared"; then
+                    import_success=true
+                fi
+                # Also check if there are no error indicators
+                if ! echo "$import_output" | grep -qi "error\|failed\|invalid"; then
+                    import_success=true
+                fi
+            fi
+            
+            if [ "$import_success" = true ]; then
+                echo "    [SUCCESS] Successfully imported $display_name"
+                # Show success details if in debug mode
+                if [ "${{ github.event.inputs.debug_mode }}" = "true" ]; then
+                    echo "              Import output:"
+                    echo "$import_output" | sed 's/^/              /' | tail -5
+                fi
                 return 0
             else
-                echo "   ❌ Import failed for $display_name"
-                echo "      Error details:"
-                echo "$import_output" | sed 's/^/        /' | head -10
-                echo "      Common causes:"
-                echo "      - Resource definition in Terraform doesn't match actual Azure resource"
-                echo "      - Missing dependencies in Terraform state"
-                echo "      - Resource provider registration issues"
-                echo "      - Permissions issues"
-                echo "      Continuing with other imports..."
+                echo "    [FAILED] Import failed for $display_name (exit code: $import_exit_code)"
+                echo "             Full error output:"
+                # Show complete error output, not just first 10 lines
+                echo "$import_output" | sed 's/^/              /'
+                echo ""
+                echo "             Common causes and solutions:"
+                echo "             - Resource definition in Terraform doesn't match actual Azure resource"
+                echo "               Solution: Check Terraform resource configuration"
+                echo "             - Missing dependencies in Terraform state" 
+                echo "               Solution: Import dependencies first or run terraform refresh"
+                echo "             - Resource provider registration issues"
+                echo "               Solution: Register required providers in Azure"
+                echo "             - Permissions issues"
+                echo "               Solution: Verify service principal has required permissions"
+                echo ""
                 return 1
             fi
         }
@@ -343,7 +372,7 @@ jobs:
         
         # Import critical resources in dependency order
         echo ""
-        echo "📋 Starting systematic resource import in dependency order..."
+        echo ">> Starting systematic resource import in dependency order..."
         
         # 1. Import Managed Identity (fundamental dependency for AKS)
         safe_import "azurerm_user_assigned_identity.aks" \
@@ -410,11 +439,48 @@ jobs:
         
         set -e  # Re-enable exit on error
         echo ""
-        echo "✅ Import process completed"
+        echo ">> Import process completed"
+        
+        # Verify which resources were actually successfully imported
+        echo ""
+        echo ">> Verifying import results..."
+        echo "================================"
+        
+        # Check each resource we tried to import
+        declare -a resources=(
+            "azurerm_user_assigned_identity.aks|Managed Identity"
+            "azurerm_log_analytics_workspace.main[0]|Log Analytics Workspace"
+            "azurerm_container_registry.main|Container Registry"
+            "azurerm_virtual_network.main|Virtual Network"
+            "azurerm_network_security_group.aks|AKS Network Security Group"
+            "azurerm_network_security_group.appgw|App Gateway Network Security Group"
+            "azurerm_public_ip.appgw|Application Gateway Public IP"
+            "azurerm_subnet.aks|AKS Subnet"
+            "azurerm_subnet.appgw|App Gateway Subnet"
+            "azurerm_subnet_network_security_group_association.aks|AKS NSG Association"
+            "azurerm_subnet_network_security_group_association.appgw|App Gateway NSG Association"
+            "azurerm_application_gateway.main|Application Gateway"
+            "azurerm_kubernetes_cluster.main|AKS Cluster"
+        )
+        
+        imported_count=0
+        for resource_info in "${resources[@]}"; do
+            IFS='|' read -r tf_resource display_name <<< "$resource_info"
+            if terraform state show "$tf_resource" >/dev/null 2>&1; then
+                echo "  [SUCCESS] $display_name - in Terraform state"
+                ((imported_count++))
+            else
+                echo "  [MISSING] $display_name - not in Terraform state"
+            fi
+        done
+        
+        echo ""
+        echo "Import Summary: $imported_count/${#resources[@]} resources successfully imported into Terraform state"
+        echo ""
         
         # Show comprehensive state and comparison
         echo ""
-        echo "📋 Post-Import Analysis:"
+        echo ">> Post-Import Analysis:"
         echo "========================"
         
         # Show final Terraform state
@@ -484,7 +550,7 @@ jobs:
         if [ $PLAN_EXIT_CODE -eq 1 ]; then
           echo ""
           echo "❌ Terraform plan failed due to errors"
-          echo "� Plan error details:"
+          echo ">> Plan error details:"
           echo "====================="
           cat terraform-plan-output.txt | tail -50
           echo ""
@@ -503,7 +569,7 @@ jobs:
         elif [ $PLAN_EXIT_CODE -eq 2 ]; then
           echo "📋 Terraform plan created with changes to apply"
           echo "PLAN_HAS_CHANGES=true" >> $GITHUB_ENV
-          echo "� Plan summary (first 30 lines):"
+          echo ">> Plan summary (first 30 lines):"
           terraform show -no-color $PLAN_FILE 2>/dev/null | head -30 || echo "Could not show plan details"
         else
           echo "📋 Terraform plan created with no changes"
