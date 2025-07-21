@@ -1,9 +1,14 @@
 #  Zabbix Server on Azure Kubernetes Service (AKS)
 
-> **✅ Status: FULLY OPERATIONAL** - All deployment issues resolved, 502 Bad Gateway fixed, Zabbix accessible via Application Gateway
+> **🔧 Status: TERRAFORM IMPORT FIX IN PROGRESS** - Resolving state conflicts for AKS cluster deployment
 
+**Latest Update**: Enhanced import scripts to handle AKS cluster import conflicts  
 **Access URL**: http://dal2-devmon-mgt-devops.eastus.cloudapp.azure.com  
 **Credentials**: Admin / zabbix
+
+> **📋 Current Issue**: AKS cluster exists in Azure but needs to be imported into Terraform state  
+> **📋 Status**: Import fix applied and deployed - monitoring GitHub Actions for resolution  
+> **📋 Details**: See [DEPLOYMENT_STATUS_UPDATE.md](DEPLOYMENT_STATUS_UPDATE.md) for real-time status
 
 This repository contains the Infrastructure as Code (IaC) and Kubernetes manifests to deploy a complete Zabbix monitoring solution on Azure Kubernetes Service (AKS) with the following components:
 
@@ -622,14 +627,29 @@ The workflow now uses the modern Azure CLI AKS addon method for installing Appli
 - LoadBalancer services need proper HTTP health check annotations
 - NSG rules are required for NodePort access
 
-### Terraform Import Issues ✅
+### Terraform Import Issues 🔧
 
-**Status**: **RESOLVED** - Enhanced focused import resolution implemented
+**Status**: **IN PROGRESS** - Enhanced focused import resolution applied
 
-The workflow now includes a focused import fix script that specifically targets the resources that commonly cause import errors during GitHub Actions deployment, including Application Gateway and subnet NSG associations. See:
+The workflow now includes a comprehensive import fix script that specifically targets the resources that commonly cause import errors during GitHub Actions deployment, including the AKS cluster. Recent enhancements include:
 
+- **Latest Fix (9e25f1a)**: Added AKS cluster import to resolve state conflicts
+- **Critical Resources**: All commonly failing resources now covered in import script
+- **Phase-based Import**: Dependency-aware import order for reliable state management
+
+See current status and real-time updates:
+- **[DEPLOYMENT_STATUS_UPDATE.md](DEPLOYMENT_STATUS_UPDATE.md)** - Real-time deployment status and monitoring
 - **[TERRAFORM_IMPORT_FIX_UPDATED.md](TERRAFORM_IMPORT_FIX_UPDATED.md)** - Latest enhanced import fix documentation
 - **[TERRAFORM_IMPORT_RESOLUTION.md](TERRAFORM_IMPORT_RESOLUTION.md)** - Previous comprehensive import resolution guide
+
+**Current Import Resources Being Handled**:
+- `azurerm_user_assigned_identity.aks`
+- `azurerm_log_analytics_solution.container_insights[0]`
+- `azurerm_application_insights.main[0]`
+- `azurerm_kubernetes_cluster.main` **[LATEST]**
+- `azurerm_application_gateway.main`
+- `azurerm_subnet_network_security_group_association.aks`
+- `azurerm_subnet_network_security_group_association.appgw`
 
 ### AKS Node Resource Group Naming ✅
 
