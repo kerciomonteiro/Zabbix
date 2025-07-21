@@ -35,6 +35,15 @@ on:
         - terraform
         - arm
         - both
+      terraform_mode:
+        description: 'Terraform execution mode'
+        required: false
+        default: 'plan-and-apply'
+        type: choice
+        options:
+        - plan-only
+        - plan-and-apply
+        - apply-existing-plan
       force_powershell:
         description: 'Force PowerShell deployment (skip Azure CLI)'
         required: false
@@ -60,8 +69,11 @@ env:
   AZURE_RESOURCE_GROUP: 'rg-devops-pops-eastus'
   AZURE_LOCATION: 'eastus'
   AZURE_SUBSCRIPTION_ID: 'd9b2a1cf-f99b-4f9e-a6cf-c79a078406bf'
-  DEPLOYMENT_TYPE: ${{ github.event.inputs.deployment_type || 'full' }}
+  AKS_CLUSTER_NAME: 'aks-devops-eastus'
+  CONTAINER_REGISTRY_NAME: 'acrdevopseastus'
+  DEPLOYMENT_TYPE: ${{ github.event.inputs.deployment_type || 'application-only' }}
   INFRASTRUCTURE_METHOD: ${{ github.event.inputs.infrastructure_method || 'terraform' }}
+  TERRAFORM_MODE: ${{ github.event.inputs.terraform_mode || 'plan-and-apply' }}
   FORCE_POWERSHELL: ${{ github.event.inputs.force_powershell || 'false' }}
   RESET_DATABASE: ${{ github.event.inputs.reset_database || 'false' }}
   DEBUG_MODE: ${{ github.event.inputs.debug_mode || 'false' }}
@@ -85,8 +97,9 @@ jobs:
     - name: Display Deployment Configuration
       run: |
         echo "=== Deployment Configuration ==="
-        echo "Deployment Type: ${{ github.event.inputs.deployment_type || 'full' }}"
+        echo "Deployment Type: ${{ github.event.inputs.deployment_type || 'application-only' }}"
         echo "Infrastructure Method: ${{ github.event.inputs.infrastructure_method || 'terraform' }}"
+        echo "Terraform Mode: ${{ github.event.inputs.terraform_mode || 'plan-and-apply' }}"
         echo "Force PowerShell: ${{ github.event.inputs.force_powershell || 'false' }}"
         echo "Reset Database: ${{ github.event.inputs.reset_database || 'false' }}"
         echo "Debug Mode: ${{ github.event.inputs.debug_mode || 'false' }}"
@@ -131,6 +144,7 @@ jobs:
       run: |
         echo "🔍 Validating infrastructure deployment method..."
         echo "Selected method: ${{ env.INFRASTRUCTURE_METHOD }}"
+        echo "Terraform mode: ${{ env.TERRAFORM_MODE }}"
         
         case "${{ env.INFRASTRUCTURE_METHOD }}" in
           "terraform")
@@ -153,9 +167,32 @@ jobs:
             exit 1
             ;;
         esac
+        
+        # Set Terraform execution mode
+        case "${{ env.TERRAFORM_MODE }}" in
+          "plan-only")
+            echo "📋 Will only create Terraform plan for review"
+            echo "TF_PLAN_ONLY=true" >> $GITHUB_ENV
+            echo "TF_APPLY_EXISTING=false" >> $GITHUB_ENV
+            ;;
+          "apply-existing-plan")
+            echo "🚀 Will apply existing Terraform plan"
+            echo "TF_PLAN_ONLY=false" >> $GITHUB_ENV
+            echo "TF_APPLY_EXISTING=true" >> $GITHUB_ENV
+            ;;
+          "plan-and-apply")
+            echo "📋🚀 Will create plan and apply immediately"
+            echo "TF_PLAN_ONLY=false" >> $GITHUB_ENV
+            echo "TF_APPLY_EXISTING=false" >> $GITHUB_ENV
+            ;;
+          *)
+            echo "❌ Invalid terraform mode: ${{ env.TERRAFORM_MODE }}"
+            exit 1
+            ;;
+        esac
 
     - name: Prepare Terraform Environment
-      if: env.DEPLOY_TERRAFORM == 'true'
+      if: ${{ env.INFRASTRUCTURE_METHOD == 'terraform' || env.INFRASTRUCTURE_METHOD == 'both' }}
       run: |
         echo "🔧 Preparing Terraform environment..."
         
@@ -207,10 +244,11 @@ jobs:
 
     - name: Deploy Infrastructure with Terraform
       id: deploy-infra-terraform
-      if: env.DEPLOY_TERRAFORM == 'true'
+      if: ${{ env.INFRASTRUCTURE_METHOD == 'terraform' || env.INFRASTRUCTURE_METHOD == 'both' }}
       continue-on-error: true
       run: |
-        echo "🚀 Deploying infrastructure using Terraform..."
+        echo "🚀 Starting Terraform deployment process..."
+        echo "Mode: ${{ env.TERRAFORM_MODE }}"
         
         cd infra/terraform
         
@@ -268,20 +306,74 @@ jobs:
         fi
         echo "✅ Terraform configuration is valid"
         
-        # Plan deployment
-        echo "📋 Creating Terraform plan..."
-        if ! terraform plan -out=tfplan; then
-          echo "❌ Terraform plan failed"
-          exit 1
-        fi
-        echo "✅ Terraform plan created successfully"
+        # Generate plan file name with timestamp
+        PLAN_FILE="tfplan-${{ github.run_number }}-$(date +%s)"
+        echo "PLAN_FILE=$PLAN_FILE" >> $GITHUB_ENV
         
-        # Apply deployment
-        echo "🏗️ Applying Terraform configuration..."
-        if terraform apply -auto-approve tfplan; then
-          echo "✅ Terraform deployment successful"
-          
-          # Capture outputs
+        # Create plan
+        echo "📋 Creating Terraform plan..."
+        if ! terraform plan -out=$PLAN_FILE -detailed-exitcode; then
+          PLAN_EXIT_CODE=$?
+          if [ $PLAN_EXIT_CODE -eq 1 ]; then
+            echo "❌ Terraform plan failed due to errors"
+            exit 1
+          elif [ $PLAN_EXIT_CODE -eq 2 ]; then
+            echo "📋 Terraform plan created with changes to apply"
+            echo "PLAN_HAS_CHANGES=true" >> $GITHUB_ENV
+          else
+            echo "📋 Terraform plan created with no changes"
+            echo "PLAN_HAS_CHANGES=false" >> $GITHUB_ENV
+          fi
+        else
+          echo "📋 Terraform plan created with no changes"
+          echo "PLAN_HAS_CHANGES=false" >> $GITHUB_ENV
+        fi
+        
+        # Display plan summary
+        echo "📋 Terraform Plan Summary:"
+        terraform show -no-color $PLAN_FILE
+        
+        # Save plan as artifact for manual review
+        echo "💾 Saving plan for review..."
+        terraform show -json $PLAN_FILE > terraform-plan.json
+        terraform show -no-color $PLAN_FILE > terraform-plan.txt
+        
+        # Check execution mode
+        if [ "${{ env.TERRAFORM_MODE }}" = "plan-only" ]; then
+          echo "📋 Plan-only mode: Terraform plan created and saved"
+          echo "🔍 Review the plan and then run the workflow with 'apply-existing-plan' mode to apply"
+          echo "DEPLOYMENT_SUCCESS=plan-created" >> $GITHUB_OUTPUT
+          echo "PLAN_FILE=$PLAN_FILE" >> $GITHUB_OUTPUT
+        elif [ "${{ env.TERRAFORM_MODE }}" = "apply-existing-plan" ]; then
+          # Look for existing plan file
+          EXISTING_PLAN=$(ls -t tfplan-* 2>/dev/null | head -n 1 || echo "")
+          if [ -z "$EXISTING_PLAN" ]; then
+            echo "❌ No existing plan found. Please run in 'plan-only' mode first."
+            echo "DEPLOYMENT_SUCCESS=false" >> $GITHUB_OUTPUT
+          else
+            echo "🚀 Applying existing plan: $EXISTING_PLAN"
+            if terraform apply -auto-approve "$EXISTING_PLAN"; then
+              echo "✅ Terraform apply completed successfully"
+              echo "DEPLOYMENT_SUCCESS=true" >> $GITHUB_OUTPUT
+            else
+              echo "❌ Terraform apply failed"
+              echo "DEPLOYMENT_SUCCESS=false" >> $GITHUB_OUTPUT
+            fi
+          fi
+        else
+          # plan-and-apply mode
+          echo "🚀 Applying Terraform plan immediately..."
+          if terraform apply -auto-approve $PLAN_FILE; then
+            echo "✅ Terraform deployment successful"
+            echo "DEPLOYMENT_SUCCESS=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Terraform deployment failed"
+            echo "DEPLOYMENT_SUCCESS=false" >> $GITHUB_OUTPUT
+          fi
+        fi
+        
+        # Capture outputs if deployment was successful
+        if [ "${{ env.TERRAFORM_MODE }}" != "plan-only" ] && [ "$(echo $GITHUB_OUTPUT | grep 'DEPLOYMENT_SUCCESS=true')" ]; then
           echo "📋 Extracting Terraform outputs..."
           set +e  # Don't exit if output extraction fails
           AKS_CLUSTER_NAME=$(terraform output -raw AKS_CLUSTER_NAME 2>/dev/null || echo "")
@@ -293,24 +385,26 @@ jobs:
           echo "AZURE_RESOURCE_GROUP=$AZURE_RESOURCE_GROUP" >> $GITHUB_OUTPUT
           echo "CONTAINER_REGISTRY_ENDPOINT=$CONTAINER_REGISTRY_ENDPOINT" >> $GITHUB_OUTPUT
           echo "DEPLOYMENT_METHOD=terraform" >> $GITHUB_OUTPUT
-          echo "DEPLOYMENT_SUCCESS=true" >> $GITHUB_OUTPUT
           
           echo "✅ Infrastructure deployed successfully with Terraform!"
           echo "   AKS Cluster: $AKS_CLUSTER_NAME"
           echo "   Resource Group: $AZURE_RESOURCE_GROUP"
           echo "   Container Registry: $CONTAINER_REGISTRY_ENDPOINT"
-        else
-          echo "❌ Terraform deployment failed"
-          echo "📋 Last terraform plan output:"
-          terraform show tfplan 2>/dev/null || echo "Could not show plan"
-          echo "📋 Current terraform state:"
-          terraform state list 2>/dev/null || echo "Could not list state"
-          echo "🔄 Will fall back to ARM templates"
-          echo "DEPLOYMENT_SUCCESS=false" >> $GITHUB_OUTPUT
         fi
 
+    - name: Upload Terraform Plan Artifacts
+      if: ${{ env.INFRASTRUCTURE_METHOD == 'terraform' || env.INFRASTRUCTURE_METHOD == 'both' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: terraform-plan-${{ github.run_number }}
+        path: |
+          infra/terraform/terraform-plan.json
+          infra/terraform/terraform-plan.txt
+          infra/terraform/tfplan-*
+        retention-days: 7
+
     - name: Pre-deployment Diagnostics
-      if: steps.deploy-infra-terraform.outputs.DEPLOYMENT_SUCCESS != 'true' && env.DEPLOY_ARM == 'true'
+      if: ${{ steps.deploy-infra-terraform.outputs.DEPLOYMENT_SUCCESS != 'true' && env.INFRASTRUCTURE_METHOD == 'arm' }}
       run: |
         echo "🔍 Running pre-deployment diagnostics for ARM template fallback..."
         
@@ -336,7 +430,7 @@ jobs:
         echo "✅ Pre-deployment diagnostics completed"
 
     - name: Validate Terraform Configuration (if using Terraform)
-      if: env.DEPLOY_TERRAFORM == 'true'
+      if: ${{ env.INFRASTRUCTURE_METHOD == 'terraform' || env.INFRASTRUCTURE_METHOD == 'both' }}
       run: |
         echo "🔍 Validating Terraform configuration..."
         cd infra/terraform
@@ -350,7 +444,7 @@ jobs:
 
     - name: Deploy Infrastructure with ARM Template (Fallback)
       id: deploy-infra-arm
-      if: env.DEPLOY_ARM == 'true' && (steps.deploy-infra-terraform.outputs.DEPLOYMENT_SUCCESS != 'true' || env.INFRASTRUCTURE_METHOD == 'arm')
+      if: ${{ env.INFRASTRUCTURE_METHOD == 'arm' || (env.INFRASTRUCTURE_METHOD == 'both' && steps.deploy-infra-terraform.outputs.DEPLOYMENT_SUCCESS != 'true') }}
       run: |
         echo "🚀 Deploying infrastructure using ARM template..."
         
@@ -462,19 +556,21 @@ jobs:
       if: steps.deploy-infra.outputs.DEPLOYMENT_SUCCESS == 'true'
       run: |
         echo "🔑 Getting AKS credentials..."
-        echo "Cluster: ${{ steps.deploy-infra.outputs.AKS_CLUSTER_NAME }}"
-        echo "Resource Group: ${{ steps.deploy-infra.outputs.AZURE_RESOURCE_GROUP }}"
+        echo "Cluster: ${{ env.AKS_CLUSTER_NAME }}"
+        echo "Resource Group: ${{ env.AZURE_RESOURCE_GROUP }}"
         
         az aks get-credentials \
-          --resource-group ${{ steps.deploy-infra.outputs.AZURE_RESOURCE_GROUP }} \
-          --name ${{ steps.deploy-infra.outputs.AKS_CLUSTER_NAME }} \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --name ${{ env.AKS_CLUSTER_NAME }} \
           --overwrite-existing
 
     - name: Verify AKS connection
       if: steps.deploy-infra.outputs.DEPLOYMENT_SUCCESS == 'true'
       run: |
+        echo "🔍 Verifying AKS cluster connection..."
         kubectl cluster-info
         kubectl get nodes
+        kubectl get namespaces
 
   # Deploy Zabbix Application
   deploy-zabbix:
@@ -492,27 +588,81 @@ jobs:
       with:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
 
+    - name: Install and Setup kubectl
+      run: |
+        echo "🔧 Setting up kubectl and Helm..."
+        
+        # Install kubectl if not available
+        if ! command -v kubectl &> /dev/null; then
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+        fi
+        
+        # Install Helm if not available
+        if ! command -v helm &> /dev/null; then
+          curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+        fi
+        
+        echo "✅ kubectl and Helm are ready"
+
     - name: Get AKS credentials
       run: |
+        echo "🔑 Getting AKS credentials for application deployment..."
+        echo "Cluster: ${{ env.AKS_CLUSTER_NAME }}"
+        echo "Resource Group: ${{ env.AZURE_RESOURCE_GROUP }}"
+        
         az aks get-credentials \
-          --resource-group ${{ needs.deploy-infrastructure.outputs.resource-group }} \
-          --name ${{ needs.deploy-infrastructure.outputs.aks-cluster-name }} \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --name ${{ env.AKS_CLUSTER_NAME }} \
           --overwrite-existing
+        
+        # Verify connection
+        kubectl cluster-info
+        kubectl get nodes
+        echo "✅ AKS connection verified"
 
-    - name: Install NGINX Ingress Controller
+    - name: Install Application Gateway Ingress Controller
       run: |
-        # Add NGINX Ingress Helm repository
-        helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+        echo "🚀 Installing Application Gateway Ingress Controller (AGIC)..."
+        
+        # Calculate Application Gateway name
+        APPGW_NAME="appgw-devops-eastus"
+        echo "Using Application Gateway: $APPGW_NAME"
+        
+        # Add AGIC Helm repository
+        helm repo add application-gateway-kubernetes-ingress https://appgwingress.blob.core.windows.net/ingress-azure-helm-package/
         helm repo update
         
-        # Install NGINX Ingress Controller
-        helm install ingress-nginx ingress-nginx/ingress-nginx \
-          --namespace ingress-nginx \
-          --create-namespace \
-          --set controller.replicaCount=2 \
-          --set controller.service.type=LoadBalancer \
-          --set controller.service.annotations."service\.beta\.kubernetes\.io/azure-load-balancer-health-probe-request-path"=/healthz \
-          --wait
+        # Create namespace for AGIC
+        kubectl create namespace agic --dry-run=client -o yaml | kubectl apply -f -
+        
+        # Install AGIC
+        helm install agic application-gateway-kubernetes-ingress/ingress-azure \
+          --namespace agic \
+          --set appgw.name=$APPGW_NAME \
+          --set appgw.resourceGroup=${{ env.AZURE_RESOURCE_GROUP }} \
+          --set appgw.subscriptionId=${{ env.AZURE_SUBSCRIPTION_ID }} \
+          --set appgw.usePrivateIP=false \
+          --set kubernetes.watchNamespace=zabbix \
+          --set armAuth.type=servicePrincipal \
+          --set armAuth.secretJSON=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | base64 -w0) \
+          --wait || {
+          echo "⚠️ AGIC installation failed, falling back to NGINX Ingress..."
+          
+          # Fallback to NGINX Ingress Controller
+          helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+          helm repo update
+          
+          helm install ingress-nginx ingress-nginx/ingress-nginx \
+            --namespace ingress-nginx \
+            --create-namespace \
+            --set controller.replicaCount=2 \
+            --set controller.service.type=LoadBalancer \
+            --set controller.service.annotations."service\.beta\.kubernetes\.io/azure-load-balancer-health-probe-request-path"=/healthz \
+            --wait
+        }
+        
+        echo "✅ Ingress controller installation completed"
 
     - name: Deploy Zabbix Namespace and Configuration
       run: |
@@ -808,32 +958,19 @@ jobs:
 
     - name: Find and Connect to Existing AKS Cluster
       run: |
-        echo "🔍 Finding existing AKS cluster in resource group ${{ env.AZURE_RESOURCE_GROUP }}..."
-        
-        # List AKS clusters in the resource group
-        AKS_CLUSTERS=$(az aks list --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --query "[].name" -o tsv)
-        
-        if [ -z "$AKS_CLUSTERS" ]; then
-          echo "❌ No AKS clusters found in resource group ${{ env.AZURE_RESOURCE_GROUP }}"
-          exit 1
-        fi
-        
-        # Get the first (or only) cluster
-        AKS_CLUSTER_NAME=$(echo "$AKS_CLUSTERS" | head -n 1)
-        echo "✅ Found AKS cluster: $AKS_CLUSTER_NAME"
+        echo "🔍 Connecting to AKS cluster ${{ env.AKS_CLUSTER_NAME }} in resource group ${{ env.AZURE_RESOURCE_GROUP }}..."
         
         # Get credentials
         az aks get-credentials \
           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-          --name "$AKS_CLUSTER_NAME" \
+          --name ${{ env.AKS_CLUSTER_NAME }} \
           --overwrite-existing
         
         # Verify connection
         kubectl cluster-info
         kubectl get nodes
         
-        # Store cluster name for other steps
-        echo "AKS_CLUSTER_NAME=$AKS_CLUSTER_NAME" >> $GITHUB_ENV
+        echo "✅ Connected to AKS cluster: ${{ env.AKS_CLUSTER_NAME }}"
 
     - name: Deploy Zabbix (Application Only)
       run: |

@@ -1,0 +1,663 @@
+name: Deploy AKS Zabbix Infrastructure & Application (Optimized)
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'infra/**'
+      - 'k8s/**'
+      - '.github/workflows/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'infra/**'
+      - 'k8s/**'
+      - '.github/workflows/**'
+  workflow_dispatch:
+    inputs:
+      deployment_type:
+        description: 'Type of deployment'
+        required: true
+        default: 'application-only'
+        type: choice
+        options:
+        - full
+        - infrastructure-only
+        - application-only
+        - redeploy-clean
+      infrastructure_method:
+        description: 'Infrastructure deployment method'
+        required: true
+        default: 'terraform'
+        type: choice
+        options:
+        - terraform
+        - arm
+        - both
+      reset_database:
+        description: 'Reset Zabbix database (WARNING: destroys data)'
+        required: false
+        default: false
+        type: boolean
+      environment_suffix:
+        description: 'Environment suffix (optional)'
+        required: false
+        default: ''
+        type: string
+      debug_mode:
+        description: 'Enable debug logging'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  AZURE_RESOURCE_GROUP: 'rg-devops-pops-eastus'
+  AZURE_LOCATION: 'eastus'
+  AZURE_SUBSCRIPTION_ID: 'd9b2a1cf-f99b-4f9e-a6cf-c79a078406bf'
+  AKS_CLUSTER_NAME: 'aks-devops-eastus'
+  CONTAINER_REGISTRY_NAME: 'acrdevopseastus'
+  PUBLIC_IP_ADDRESS: '20.185.208.193'
+  PUBLIC_FQDN: 'dal2-devmon-mgt-devops.eastus.cloudapp.azure.com'
+  DEPLOYMENT_TYPE: ${{ github.event.inputs.deployment_type || 'application-only' }}
+  INFRASTRUCTURE_METHOD: ${{ github.event.inputs.infrastructure_method || 'terraform' }}
+  RESET_DATABASE: ${{ github.event.inputs.reset_database || 'false' }}
+  DEBUG_MODE: ${{ github.event.inputs.debug_mode || 'false' }}
+  ENV_SUFFIX: ${{ github.event.inputs.environment_suffix || '' }}
+
+jobs:
+  # Infrastructure Deployment
+  deploy-infrastructure:
+    runs-on: ubuntu-latest
+    environment: production
+    if: ${{ github.event.inputs.deployment_type == 'full' || github.event.inputs.deployment_type == 'infrastructure-only' || github.event.inputs.deployment_type == 'redeploy-clean' || github.event.inputs.deployment_type == '' || github.event.inputs.deployment_type == null }}
+    outputs:
+      aks-cluster-name: ${{ steps.set-outputs.outputs.AKS_CLUSTER_NAME }}
+      resource-group: ${{ steps.set-outputs.outputs.AZURE_RESOURCE_GROUP }}
+      container-registry: ${{ steps.set-outputs.outputs.CONTAINER_REGISTRY_ENDPOINT }}
+      deployment-success: ${{ steps.set-outputs.outputs.DEPLOYMENT_SUCCESS }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Display Deployment Configuration
+      run: |
+        echo "=== Infrastructure Deployment Configuration ==="
+        echo "Deployment Type: ${{ env.DEPLOYMENT_TYPE }}"
+        echo "Infrastructure Method: ${{ env.INFRASTRUCTURE_METHOD }}"
+        echo "Reset Database: ${{ env.RESET_DATABASE }}"
+        echo "Debug Mode: ${{ env.DEBUG_MODE }}"
+        echo "Environment Suffix: ${{ env.ENV_SUFFIX || 'none' }}"
+        echo "Resource Group: ${{ env.AZURE_RESOURCE_GROUP }}"
+        echo "Location: ${{ env.AZURE_LOCATION }}"
+        echo "AKS Cluster: ${{ env.AKS_CLUSTER_NAME }}"
+        echo "Run Number: ${{ github.run_number }}"
+        echo "Actor: ${{ github.actor }}"
+
+    - name: Azure CLI Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Set up Azure CLI
+      run: |
+        az account set --subscription ${{ env.AZURE_SUBSCRIPTION_ID }}
+        az account show
+        echo "✅ Azure CLI configured"
+
+    - name: Install Terraform
+      uses: hashicorp/setup-terraform@v2
+      with:
+        terraform_version: '1.6.0'
+
+    - name: Deploy Infrastructure with Terraform
+      id: deploy-terraform
+      if: ${{ env.INFRASTRUCTURE_METHOD == 'terraform' || env.INFRASTRUCTURE_METHOD == 'both' }}
+      working-directory: infra/terraform
+      run: |
+        echo "🚀 Deploying infrastructure using Terraform..."
+        
+        # Initialize Terraform
+        terraform init
+        
+        # Create terraform.tfvars
+        ENV_NAME="${{ env.ENV_SUFFIX && format('zabbix-devops-{0}-{1}', env.AZURE_LOCATION, env.ENV_SUFFIX) || format('zabbix-devops-{0}', env.AZURE_LOCATION) }}"
+        
+        cat > terraform.tfvars << EOF
+        resource_group_name = "${{ env.AZURE_RESOURCE_GROUP }}"
+        location           = "${{ env.AZURE_LOCATION }}"
+        environment_name   = "$ENV_NAME"
+        kubernetes_version = "1.32"
+        aks_system_node_count = 2
+        aks_user_node_count   = 2
+        aks_user_node_min_count = 2
+        aks_user_node_max_count = 10
+        aks_system_vm_size = "Standard_D2s_v3"
+        aks_user_vm_size   = "Standard_D4s_v3"
+        enable_auto_scaling  = true
+        enable_azure_policy  = true
+        enable_log_analytics = true
+        log_analytics_retention_days = 30
+        EOF
+        
+        # Import existing resources (ignore failures)
+        set +e
+        echo "📦 Importing existing resources..."
+        terraform import azurerm_user_assigned_identity.aks "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-devops-${{ env.AZURE_LOCATION }}" 2>/dev/null || true
+        terraform import azurerm_container_registry.main "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.ContainerRegistry/registries/${{ env.CONTAINER_REGISTRY_NAME }}" 2>/dev/null || true
+        terraform import azurerm_kubernetes_cluster.main "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.ContainerService/managedClusters/${{ env.AKS_CLUSTER_NAME }}" 2>/dev/null || true
+        set -e
+        
+        # Validate and plan
+        terraform validate
+        terraform plan -out=tfplan
+        
+        # Apply
+        if terraform apply -auto-approve tfplan; then
+          echo "✅ Terraform deployment successful"
+          echo "TERRAFORM_SUCCESS=true" >> $GITHUB_OUTPUT
+        else
+          echo "❌ Terraform deployment failed"
+          echo "TERRAFORM_SUCCESS=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Set Infrastructure Outputs
+      id: set-outputs
+      run: |
+        if [ "${{ steps.deploy-terraform.outputs.TERRAFORM_SUCCESS }}" = "true" ] || [ "${{ env.DEPLOYMENT_TYPE }}" = "infrastructure-only" ]; then
+          echo "AKS_CLUSTER_NAME=${{ env.AKS_CLUSTER_NAME }}" >> $GITHUB_OUTPUT
+          echo "AZURE_RESOURCE_GROUP=${{ env.AZURE_RESOURCE_GROUP }}" >> $GITHUB_OUTPUT
+          echo "CONTAINER_REGISTRY_ENDPOINT=${{ env.CONTAINER_REGISTRY_NAME }}.azurecr.io" >> $GITHUB_OUTPUT
+          echo "DEPLOYMENT_SUCCESS=true" >> $GITHUB_OUTPUT
+        else
+          echo "DEPLOYMENT_SUCCESS=false" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+
+    - name: Verify AKS Cluster
+      if: steps.set-outputs.outputs.DEPLOYMENT_SUCCESS == 'true'
+      run: |
+        echo "🔑 Getting AKS credentials..."
+        az aks get-credentials \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --name ${{ env.AKS_CLUSTER_NAME }} \
+          --overwrite-existing
+        
+        echo "✅ Verifying AKS connection..."
+        kubectl cluster-info
+        kubectl get nodes
+
+  # Deploy Zabbix Application
+  deploy-zabbix:
+    needs: deploy-infrastructure
+    runs-on: ubuntu-latest
+    environment: production
+    if: ${{ always() && (github.event.inputs.deployment_type == 'full' || github.event.inputs.deployment_type == 'application-only' || github.event.inputs.deployment_type == 'redeploy-clean' || github.event.inputs.deployment_type == '' || github.event.inputs.deployment_type == null) && (needs.deploy-infrastructure.result == 'success' || github.event.inputs.deployment_type == 'application-only') }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Display Application Deployment Configuration
+      run: |
+        echo "=== Zabbix Application Deployment ==="
+        echo "Deployment Type: ${{ env.DEPLOYMENT_TYPE }}"
+        echo "Reset Database: ${{ env.RESET_DATABASE }}"
+        echo "Debug Mode: ${{ env.DEBUG_MODE }}"
+        echo "AKS Cluster: ${{ env.AKS_CLUSTER_NAME }}"
+        echo "Resource Group: ${{ env.AZURE_RESOURCE_GROUP }}"
+
+    - name: Azure CLI Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Set up Azure CLI and kubectl
+      run: |
+        az account set --subscription ${{ env.AZURE_SUBSCRIPTION_ID }}
+        
+        # Get AKS credentials
+        az aks get-credentials \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --name ${{ env.AKS_CLUSTER_NAME }} \
+          --overwrite-existing
+        
+        # Verify connection
+        kubectl cluster-info
+        kubectl get nodes
+
+    - name: Install Helm
+      uses: azure/setup-helm@v3
+      with:
+        version: '3.13.0'
+
+    - name: Setup Application Gateway Ingress Controller (AGIC)
+      id: setup-agic
+      continue-on-error: true
+      run: |
+        echo "🔧 Setting up Application Gateway Ingress Controller..."
+        
+        # Check if AGIC is already installed
+        if kubectl get deployment -n kube-system ingress-appgw 2>/dev/null; then
+          echo "✅ AGIC already installed"
+          echo "AGIC_INSTALLED=true" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+        
+        # Get Application Gateway details
+        APP_GW_NAME="appgw-devops-${{ env.AZURE_LOCATION }}"
+        
+        # Check if Application Gateway exists
+        if ! az network application-gateway show --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name $APP_GW_NAME &>/dev/null; then
+          echo "⚠️ Application Gateway $APP_GW_NAME not found, will use NGINX Ingress"
+          echo "AGIC_INSTALLED=false" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+        
+        # Install AGIC addon
+        if az aks enable-addons \
+           --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+           --name ${{ env.AKS_CLUSTER_NAME }} \
+           --addons ingress-appgw \
+           --appgw-name $APP_GW_NAME \
+           --appgw-subnet-id "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.Network/virtualNetworks/vnet-devops-${{ env.AZURE_LOCATION }}/subnets/subnet-appgw-devops-${{ env.AZURE_LOCATION }}"; then
+          
+          echo "✅ AGIC addon installed successfully"
+          echo "AGIC_INSTALLED=true" >> $GITHUB_OUTPUT
+          
+          # Wait for AGIC to be ready
+          kubectl wait --for=condition=available deployment/ingress-appgw -n kube-system --timeout=300s || true
+        else
+          echo "⚠️ AGIC addon installation failed, will use NGINX Ingress"
+          echo "AGIC_INSTALLED=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Setup NGINX Ingress Controller (Fallback)
+      if: steps.setup-agic.outputs.AGIC_INSTALLED != 'true'
+      run: |
+        echo "🔧 Setting up NGINX Ingress Controller..."
+        
+        # Check if NGINX Ingress is already installed
+        if kubectl get namespace ingress-nginx 2>/dev/null; then
+          echo "✅ NGINX Ingress already installed"
+          exit 0
+        fi
+        
+        # Add NGINX Ingress Helm repository
+        helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+        helm repo update
+        
+        # Install NGINX Ingress Controller
+        helm install ingress-nginx ingress-nginx/ingress-nginx \
+          --namespace ingress-nginx \
+          --create-namespace \
+          --set controller.replicaCount=2 \
+          --set controller.service.type=LoadBalancer \
+          --set controller.service.annotations."service\.beta\.kubernetes\.io/azure-load-balancer-health-probe-request-path"=/healthz \
+          --set controller.service.loadBalancerIP=${{ env.PUBLIC_IP_ADDRESS }} \
+          --wait
+        
+        echo "✅ NGINX Ingress Controller installed"
+
+    - name: Deploy Zabbix Namespace and Configuration
+      run: |
+        echo "📝 Deploying Zabbix namespace and configuration..."
+        kubectl apply -f k8s/zabbix-config.yaml
+        kubectl get namespace zabbix
+        echo "✅ Zabbix namespace ready"
+
+    - name: Cleanup Existing Zabbix Resources (Conditional)
+      if: ${{ env.DEPLOYMENT_TYPE == 'redeploy-clean' || env.RESET_DATABASE == 'true' }}
+      run: |
+        echo "🧹 Performing full cleanup of Zabbix resources..."
+        echo "Deployment Type: ${{ env.DEPLOYMENT_TYPE }}"
+        echo "Reset Database: ${{ env.RESET_DATABASE }}"
+        
+        # Delete all Zabbix resources
+        kubectl delete deployment --all -n zabbix --ignore-not-found=true
+        kubectl delete service --all -n zabbix --ignore-not-found=true
+        kubectl delete ingress --all -n zabbix --ignore-not-found=true
+        kubectl delete job --all -n zabbix --ignore-not-found=true
+        
+        # Delete PVCs if database reset is requested
+        if [ "${{ env.RESET_DATABASE }}" = "true" ]; then
+          echo "⚠️ RESETTING DATABASE - All data will be lost!"
+          kubectl delete pvc -n zabbix --all --ignore-not-found=true
+        fi
+        
+        # Wait for resources to be deleted
+        kubectl wait --for=delete pods --all -n zabbix --timeout=120s || true
+        echo "✅ Cleanup completed"
+
+    - name: Smart Cleanup for Regular Deployments
+      if: ${{ env.DEPLOYMENT_TYPE != 'redeploy-clean' && env.RESET_DATABASE != 'true' }}
+      run: |
+        echo "🔄 Performing smart cleanup (preserving data)..."
+        
+        # Only delete deployments and services, keep PVCs and secrets
+        kubectl delete deployment --all -n zabbix --ignore-not-found=true
+        kubectl delete service --all -n zabbix --ignore-not-found=true
+        kubectl delete ingress --all -n zabbix --ignore-not-found=true
+        kubectl delete job --all -n zabbix --ignore-not-found=true
+        
+        # Wait for pods to terminate
+        kubectl wait --for=delete pods -l app!=zabbix-mysql -n zabbix --timeout=120s || echo "⚠️ Some pods may still be terminating"
+        echo "✅ Smart cleanup completed - data preserved"
+
+    - name: Deploy MySQL Database
+      run: |
+        echo "🗄️ Deploying MySQL database..."
+        kubectl apply -f k8s/zabbix-mysql.yaml
+        
+        # Wait for MySQL to be ready
+        echo "⏳ Waiting for MySQL pod to be ready..."
+        kubectl wait --for=condition=ready pod -l app=zabbix-mysql -n zabbix --timeout=600s
+        echo "✅ MySQL database is ready"
+
+    - name: Initialize Zabbix Database
+      run: |
+        echo "🔧 Initializing Zabbix database..."
+        
+        # Get MySQL pod name
+        MYSQL_POD=$(kubectl get pods -n zabbix -l app=zabbix-mysql -o jsonpath='{.items[0].metadata.name}')
+        echo "MySQL Pod: $MYSQL_POD"
+        
+        # Check if database exists and has data
+        DB_EXISTS=$(kubectl exec -n zabbix $MYSQL_POD -- mysql -u root -pZabbixRoot123! -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='zabbix';" 2>/dev/null | tail -n 1 || echo "0")
+        
+        # Force database reset if requested
+        if [ "${{ env.RESET_DATABASE }}" = "true" ]; then
+          echo "⚠️ Force database reset requested"
+          DB_EXISTS="0"
+        fi
+        
+        if [ "$DB_EXISTS" -gt "10" ]; then
+          echo "✅ Zabbix database already exists with $DB_EXISTS tables"
+          echo "Skipping database initialization"
+        else
+          echo "🔧 Setting up fresh Zabbix database..."
+          
+          # Create database and user
+          kubectl exec -n zabbix $MYSQL_POD -- mysql -u root -pZabbixRoot123! -e "DROP DATABASE IF EXISTS zabbix;"
+          kubectl exec -n zabbix $MYSQL_POD -- mysql -u root -pZabbixRoot123! -e "CREATE DATABASE zabbix CHARACTER SET utf8 COLLATE utf8_bin;"
+          kubectl exec -n zabbix $MYSQL_POD -- mysql -u root -pZabbixRoot123! -e "GRANT ALL PRIVILEGES ON zabbix.* TO 'zabbix'@'%' IDENTIFIED BY 'zabbix123!';"
+          kubectl exec -n zabbix $MYSQL_POD -- mysql -u root -pZabbixRoot123! -e "FLUSH PRIVILEGES;"
+          
+          # Apply database initialization job
+          kubectl apply -f k8s/zabbix-db-init-direct.yaml
+          
+          # Wait for initialization to complete
+          kubectl wait --for=condition=complete job/zabbix-db-init -n zabbix --timeout=600s || {
+            echo "⚠️ Database initialization job didn't complete, checking logs..."
+            kubectl logs job/zabbix-db-init -n zabbix || true
+            echo "Continuing anyway..."
+          }
+          
+          # Verify database was created
+          TABLE_COUNT=$(kubectl exec -n zabbix $MYSQL_POD -- mysql -u root -pZabbixRoot123! -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='zabbix';" 2>/dev/null | tail -n 1 || echo "0")
+          echo "Database tables created: $TABLE_COUNT"
+          
+          if [ "$TABLE_COUNT" -lt "10" ]; then
+            echo "❌ Database initialization failed"
+            exit 1
+          fi
+          
+          echo "✅ Database initialization completed successfully"
+        fi
+
+    - name: Deploy Zabbix Server Components
+      run: |
+        echo "🚀 Deploying Zabbix server components..."
+        
+        # Deploy Java Gateway first
+        kubectl apply -f k8s/zabbix-additional.yaml
+        kubectl wait --for=condition=available deployment/zabbix-java-gateway -n zabbix --timeout=300s
+        
+        # Deploy Zabbix Server
+        kubectl apply -f k8s/zabbix-server.yaml
+        kubectl wait --for=condition=available deployment/zabbix-server -n zabbix --timeout=600s
+        
+        echo "✅ Zabbix server components deployed"
+
+    - name: Deploy Zabbix Web Interface
+      run: |
+        echo "🌐 Deploying Zabbix web interface..."
+        kubectl apply -f k8s/zabbix-web.yaml
+        kubectl wait --for=condition=available deployment/zabbix-web -n zabbix --timeout=300s
+        echo "✅ Zabbix web interface deployed"
+
+    - name: Deploy Ingress Configuration
+      run: |
+        echo "🌐 Deploying ingress configuration..."
+        
+        # Apply ingress configuration
+        kubectl apply -f k8s/zabbix-ingress.yaml
+        
+        # Wait a moment for ingress to process
+        sleep 30
+        
+        echo "✅ Ingress configuration applied"
+
+    - name: Get Application Access Information
+      run: |
+        echo "=== 🎉 Zabbix Deployment Complete! ==="
+        echo ""
+        echo "🌐 **Web Interface Access:**"
+        
+        # Get LoadBalancer service IP if exists
+        LB_IP=$(kubectl get service -n zabbix zabbix-web-external -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+        if [ ! -z "$LB_IP" ]; then
+          echo "   LoadBalancer IP: http://$LB_IP"
+        fi
+        
+        # Get Ingress information
+        echo "   Ingress: http://${{ env.PUBLIC_FQDN }}"
+        echo "   Application Gateway IP: ${{ env.PUBLIC_IP_ADDRESS }}"
+        echo ""
+        echo "🔐 **Default Credentials:**"
+        echo "   Username: Admin"
+        echo "   Password: zabbix"
+        echo ""
+        echo "📋 **Kubernetes Resources:**"
+        kubectl get pods -n zabbix -o wide
+        echo ""
+        kubectl get services -n zabbix
+        echo ""
+        kubectl get ingress -n zabbix
+        echo ""
+        echo "⚠️ **Security Reminders:**"
+        echo "1. Change default admin password immediately"
+        echo "2. Configure SSL certificate for HTTPS"
+        echo "3. Update database passwords in production"
+        echo "4. Configure proper DNS records"
+
+  # Application-Only Deployment (uses existing AKS cluster)
+  deploy-zabbix-only:
+    runs-on: ubuntu-latest
+    environment: production
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.deployment_type == 'application-only' }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Display Application-Only Configuration
+      run: |
+        echo "=== Application-Only Deployment ==="
+        echo "AKS Cluster: ${{ env.AKS_CLUSTER_NAME }}"
+        echo "Resource Group: ${{ env.AZURE_RESOURCE_GROUP }}"
+        echo "Reset Database: ${{ env.RESET_DATABASE }}"
+        echo "Debug Mode: ${{ env.DEBUG_MODE }}"
+
+    - name: Azure CLI Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Connect to AKS Cluster
+      run: |
+        echo "🔑 Connecting to AKS cluster..."
+        az account set --subscription ${{ env.AZURE_SUBSCRIPTION_ID }}
+        
+        az aks get-credentials \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --name ${{ env.AKS_CLUSTER_NAME }} \
+          --overwrite-existing
+        
+        kubectl cluster-info
+        kubectl get nodes
+        echo "✅ Connected to AKS cluster"
+
+    - name: Install Helm
+      uses: azure/setup-helm@v3
+      with:
+        version: '3.13.0'
+
+    - name: Deploy Zabbix Application (Application Only)
+      run: |
+        echo "🚀 Deploying Zabbix application to existing cluster..."
+        
+        # Check for AGIC first
+        if kubectl get deployment -n kube-system ingress-appgw 2>/dev/null; then
+          echo "✅ Using Application Gateway Ingress Controller (AGIC)"
+        else
+          echo "🔧 Installing NGINX Ingress Controller..."
+          if ! kubectl get namespace ingress-nginx 2>/dev/null; then
+            helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+            helm repo update
+            helm install ingress-nginx ingress-nginx/ingress-nginx \
+              --namespace ingress-nginx \
+              --create-namespace \
+              --set controller.replicaCount=2 \
+              --set controller.service.type=LoadBalancer \
+              --set controller.service.loadBalancerIP=${{ env.PUBLIC_IP_ADDRESS }} \
+              --wait
+          fi
+        fi
+        
+        # Deploy Zabbix components
+        kubectl apply -f k8s/zabbix-config.yaml
+        
+        # Conditional cleanup
+        if [ "${{ env.RESET_DATABASE }}" = "true" ]; then
+          echo "⚠️ Resetting all Zabbix resources and data..."
+          kubectl delete all,pvc,configmap,secret,job -n zabbix --all --ignore-not-found=true
+          kubectl wait --for=delete pods --all -n zabbix --timeout=120s || true
+        else
+          echo "🔄 Smart cleanup (preserving data)..."
+          kubectl delete deployment,service,ingress,job -n zabbix --all --ignore-not-found=true
+        fi
+        
+        # Deploy MySQL
+        kubectl apply -f k8s/zabbix-mysql.yaml
+        kubectl wait --for=condition=ready pod -l app=zabbix-mysql -n zabbix --timeout=600s
+        
+        # Initialize database if needed
+        MYSQL_POD=$(kubectl get pods -n zabbix -l app=zabbix-mysql -o jsonpath='{.items[0].metadata.name}')
+        DB_EXISTS=$(kubectl exec -n zabbix $MYSQL_POD -- mysql -u root -pZabbixRoot123! -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='zabbix';" 2>/dev/null | tail -n 1 || echo "0")
+        
+        if [ "${{ env.RESET_DATABASE }}" = "true" ] || [ "$DB_EXISTS" -lt "10" ]; then
+          echo "🔧 Initializing database..."
+          kubectl exec -n zabbix $MYSQL_POD -- mysql -u root -pZabbixRoot123! -e "DROP DATABASE IF EXISTS zabbix; CREATE DATABASE zabbix CHARACTER SET utf8 COLLATE utf8_bin; GRANT ALL PRIVILEGES ON zabbix.* TO 'zabbix'@'%' IDENTIFIED BY 'zabbix123!'; FLUSH PRIVILEGES;"
+          kubectl apply -f k8s/zabbix-db-init-direct.yaml
+          kubectl wait --for=condition=complete job/zabbix-db-init -n zabbix --timeout=600s || true
+        fi
+        
+        # Deploy Zabbix components
+        kubectl apply -f k8s/zabbix-additional.yaml
+        kubectl wait --for=condition=available deployment/zabbix-java-gateway -n zabbix --timeout=300s
+        
+        kubectl apply -f k8s/zabbix-server.yaml
+        kubectl wait --for=condition=available deployment/zabbix-server -n zabbix --timeout=600s
+        
+        kubectl apply -f k8s/zabbix-web.yaml
+        kubectl wait --for=condition=available deployment/zabbix-web -n zabbix --timeout=300s
+        
+        kubectl apply -f k8s/zabbix-ingress.yaml
+        
+        echo "✅ Application-only deployment completed!"
+        
+        # Display final status
+        echo "=== Deployment Status ==="
+        kubectl get all -n zabbix
+        kubectl get ingress -n zabbix
+
+  # Post-Deployment Tasks
+  post-deployment:
+    needs: [deploy-infrastructure, deploy-zabbix, deploy-zabbix-only]
+    runs-on: ubuntu-latest
+    if: ${{ always() && (needs.deploy-zabbix.result == 'success' || needs.deploy-zabbix-only.result == 'success') }}
+    
+    steps:
+    - name: Generate Deployment Report
+      run: |
+        echo "=== 📊 Final Deployment Report ===" > deployment-report.md
+        echo "" >> deployment-report.md
+        echo "**🚀 Deployment Details:**" >> deployment-report.md
+        echo "- **Date:** $(date)" >> deployment-report.md
+        echo "- **Environment:** Production" >> deployment-report.md
+        echo "- **Type:** ${{ env.DEPLOYMENT_TYPE }}" >> deployment-report.md
+        echo "- **AKS Cluster:** ${{ env.AKS_CLUSTER_NAME }}" >> deployment-report.md
+        echo "- **Resource Group:** ${{ env.AZURE_RESOURCE_GROUP }}" >> deployment-report.md
+        echo "- **Container Registry:** ${{ env.CONTAINER_REGISTRY_NAME }}.azurecr.io" >> deployment-report.md
+        echo "" >> deployment-report.md
+        echo "**🌐 Access Information:**" >> deployment-report.md
+        echo "- **Web Interface:** http://${{ env.PUBLIC_FQDN }}" >> deployment-report.md
+        echo "- **Public IP:** ${{ env.PUBLIC_IP_ADDRESS }}" >> deployment-report.md
+        echo "- **Default Login:** Admin / zabbix" >> deployment-report.md
+        echo "" >> deployment-report.md
+        echo "**📋 Next Steps:**" >> deployment-report.md
+        echo "1. ✅ Configure DNS for ${{ env.PUBLIC_FQDN }}" >> deployment-report.md
+        echo "2. 🔒 Upload SSL certificate for HTTPS" >> deployment-report.md
+        echo "3. 🔑 Change default admin password immediately" >> deployment-report.md
+        echo "4. 📊 Configure Zabbix monitoring templates" >> deployment-report.md
+        echo "5. 🔐 Update database passwords for production" >> deployment-report.md
+        
+        cat deployment-report.md
+        echo "" >> $GITHUB_STEP_SUMMARY
+        cat deployment-report.md >> $GITHUB_STEP_SUMMARY
+
+    - name: Upload Deployment Report
+      uses: actions/upload-artifact@v3
+      with:
+        name: zabbix-deployment-report
+        path: deployment-report.md
+
+  # Final Summary
+  deployment-summary:
+    needs: [deploy-infrastructure, deploy-zabbix, deploy-zabbix-only, post-deployment]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+    - name: Generate Final Summary
+      run: |
+        echo "=== 🏁 Final Deployment Summary ===" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Job Results:**" >> $GITHUB_STEP_SUMMARY
+        echo "- Infrastructure: ${{ needs.deploy-infrastructure.result || 'skipped' }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Zabbix Application: ${{ needs.deploy-zabbix.result || 'skipped' }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Application-Only: ${{ needs.deploy-zabbix-only.result || 'skipped' }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Post-Deployment: ${{ needs.post-deployment.result || 'skipped' }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        # Overall status determination
+        if [[ "${{ needs.deploy-zabbix.result }}" == "success" || "${{ needs.deploy-zabbix-only.result }}" == "success" ]]; then
+          echo "**✅ Overall Status: SUCCESS**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "🎉 **Zabbix is now accessible at:** http://${{ env.PUBLIC_FQDN }}" >> $GITHUB_STEP_SUMMARY
+          echo "🔐 **Login with:** Admin / zabbix" >> $GITHUB_STEP_SUMMARY
+        elif [[ "${{ needs.deploy-infrastructure.result }}" == "success" && "${{ env.DEPLOYMENT_TYPE }}" == "infrastructure-only" ]]; then
+          echo "**✅ Infrastructure Status: SUCCESS**" >> $GITHUB_STEP_SUMMARY
+          echo "Infrastructure is ready for application deployment." >> $GITHUB_STEP_SUMMARY
+        else
+          echo "**❌ Overall Status: FAILED**" >> $GITHUB_STEP_SUMMARY
+          echo "Check individual job logs for details." >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**🔄 Redeployment Options:**" >> $GITHUB_STEP_SUMMARY
+        echo "- **Full Redeploy:** Use 'redeploy-clean' deployment type" >> $GITHUB_STEP_SUMMARY
+        echo "- **App Only:** Use 'application-only' for Zabbix-only redeploy" >> $GITHUB_STEP_SUMMARY
+        echo "- **Infrastructure Only:** Use 'infrastructure-only' for infra changes" >> $GITHUB_STEP_SUMMARY
+        echo "- **Reset Database:** Enable 'reset_database' option (⚠️ destroys data)" >> $GITHUB_STEP_SUMMARY
