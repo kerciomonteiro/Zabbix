@@ -60,6 +60,32 @@ else
     fi
 fi
 
+# Step 3.5: Import existing Kubernetes resources (if AKS cluster exists)
+echo ""
+echo "=== STEP 3.5: Import Kubernetes Resources ==="
+if terraform state show "azurerm_kubernetes_cluster.main" >/dev/null 2>&1; then
+    echo "✅ AKS cluster found in state - checking for existing Kubernetes resources..."
+    
+    # Try to import Kubernetes resources that commonly cause "already exists" errors
+    set +e  # Don't exit on import errors
+    echo "🎯 Running Kubernetes resource conflict resolution..."
+    if [ -f "../../scripts/terraform/resolve-k8s-conflicts.sh" ]; then
+        ../../scripts/terraform/resolve-k8s-conflicts.sh
+        K8S_IMPORT_EXIT_CODE=$?
+        if [ $K8S_IMPORT_EXIT_CODE -eq 0 ]; then
+            echo "✅ Kubernetes resource import completed successfully"
+        else
+            echo "⚠️ Kubernetes resource import had issues (exit code: $K8S_IMPORT_EXIT_CODE)"
+            echo "   This is often normal - resources may not exist or may already be in state"
+        fi
+    else
+        echo "ℹ️  Kubernetes conflict resolution script not found - skipping"
+    fi
+    set -e  # Re-enable exit on error
+else
+    echo "ℹ️  AKS cluster not yet in state - skipping Kubernetes resource import"
+fi
+
 # Step 4: Re-enable Kubernetes provider
 echo ""
 echo "=== STEP 4: Enable Kubernetes Provider ==="
