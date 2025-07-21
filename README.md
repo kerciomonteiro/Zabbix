@@ -1,14 +1,16 @@
 #  Zabbix Server on Azure Kubernetes Service (AKS)
 
-> **🔧 Status: TERRAFORM IMPORT FIX IN PROGRESS** - Resolving state conflicts for AKS cluster deployment
+> **� Status: MANAGED IDENTITY CREDENTIAL ISSUE - ACTIVELY RESOLVING** - Enhanced dependency management and propagation delay applied
 
-**Latest Update**: Enhanced import scripts to handle AKS cluster import conflicts  
+**Latest Update**: Applied comprehensive fix for managed identity credential reconciliation failure  
 **Access URL**: http://dal2-devmon-mgt-devops.eastus.cloudapp.azure.com  
 **Credentials**: Admin / zabbix
 
-> **📋 Current Issue**: AKS cluster exists in Azure but needs to be imported into Terraform state  
-> **📋 Status**: Import fix applied and deployed - monitoring GitHub Actions for resolution  
-> **📋 Details**: See [DEPLOYMENT_STATUS_UPDATE.md](DEPLOYMENT_STATUS_UPDATE.md) for real-time status
+> **📋 Current Issue**: AKS cluster creation fails due to managed identity credential reconciliation error  
+> **📋 Root Cause**: Timing issue between identity creation/role assignments and AKS cluster usage  
+> **📋 Solution Applied**: Enhanced dependencies, 60-second propagation delay, comprehensive recovery tools  
+> **📋 Status**: Fix deployed - monitoring GitHub Actions for resolution  
+> **📋 Details**: See [MANAGED_IDENTITY_FIX.md](MANAGED_IDENTITY_FIX.md) and [DEPLOYMENT_STATUS_UPDATE.md](DEPLOYMENT_STATUS_UPDATE.md)
 
 This repository contains the Infrastructure as Code (IaC) and Kubernetes manifests to deploy a complete Zabbix monitoring solution on Azure Kubernetes Service (AKS) with the following components:
 
@@ -627,20 +629,28 @@ The workflow now uses the modern Azure CLI AKS addon method for installing Appli
 - LoadBalancer services need proper HTTP health check annotations
 - NSG rules are required for NodePort access
 
-### Terraform Import Issues 🔧
+### Managed Identity Issues �
 
-**Status**: **IN PROGRESS** - Enhanced focused import resolution applied
+**Status**: **ACTIVELY RESOLVING** - Comprehensive fix applied for credential reconciliation failure
 
-The workflow now includes a comprehensive import fix script that specifically targets the resources that commonly cause import errors during GitHub Actions deployment, including the AKS cluster. Recent enhancements include:
+The deployment encountered a managed identity credential reconciliation issue during AKS cluster creation. This is a critical Azure infrastructure issue that has been comprehensively addressed:
 
-- **Latest Fix (9e25f1a)**: Added AKS cluster import to resolve state conflicts
-- **Critical Resources**: All commonly failing resources now covered in import script
-- **Phase-based Import**: Dependency-aware import order for reliable state management
+**Error Details:**
+```
+"Reconcile managed identity credential failed. Details: unexpected response from MSI data plane, length of returned certificate: 0"
+```
 
-See current status and real-time updates:
+**Solutions Applied:**
+- **Enhanced Dependency Management**: All role assignments must complete before AKS creation
+- **Identity Propagation Delay**: 60-second time delay to ensure managed identity is accessible
+- **Comprehensive Recovery Tools**: Scripts and documentation for manual troubleshooting
+
+**Latest Fix (99a5c67)**: Complete managed identity credential reconciliation resolution
+
+See comprehensive analysis and recovery options:
+- **[MANAGED_IDENTITY_FIX.md](MANAGED_IDENTITY_FIX.md)** - Detailed analysis, root cause, and solutions
 - **[DEPLOYMENT_STATUS_UPDATE.md](DEPLOYMENT_STATUS_UPDATE.md)** - Real-time deployment status and monitoring
-- **[TERRAFORM_IMPORT_FIX_UPDATED.md](TERRAFORM_IMPORT_FIX_UPDATED.md)** - Latest enhanced import fix documentation
-- **[TERRAFORM_IMPORT_RESOLUTION.md](TERRAFORM_IMPORT_RESOLUTION.md)** - Previous comprehensive import resolution guide
+- **[scripts/terraform/managed-identity-recovery.sh](scripts/terraform/managed-identity-recovery.sh)** - Manual recovery script
 
 **Current Import Resources Being Handled**:
 - `azurerm_user_assigned_identity.aks`
