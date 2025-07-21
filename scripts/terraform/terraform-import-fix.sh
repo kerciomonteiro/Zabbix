@@ -140,7 +140,7 @@ try_import "azurerm_application_gateway.main" \
 
 try_import "azurerm_kubernetes_cluster.main" \
     "/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.ContainerService/managedClusters/aks-devops-eastus" \
-    "AKS Cluster"
+    "AKS Cluster (may be skipped if recreation needed)"
 
 echo ""
 echo "✅ Import fix script completed"

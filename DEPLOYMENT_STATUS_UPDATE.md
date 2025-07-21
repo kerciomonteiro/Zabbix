@@ -1,19 +1,33 @@
 # Zabbix AKS Deployment - Status Update
 
-## 🎯 Current Status: **AKS CLUSTER IMPORT FIX APPLIED**
+## 🎯 Current Status: **MANAGED IDENTITY CREDENTIAL ISSUE DETECTED**
 
-### Recent Issue Identified and Fixed
+### Critical Issue Identified and Addressed
 
-**❌ AKS Cluster Import Error Detected**
+**❌ New Issue: Managed Identity Credential Reconciliation Failed**
 ```
-Error: A resource with the ID "/subscriptions/.../managedClusters/aks-devops-eastus" already exists - to be managed via Terraform this resource needs to be imported into the State.
+Error: creating Kubernetes Cluster - polling failed: 
+Status: "NotFound"
+Message: "Reconcile managed identity credential failed. Details: unexpected response from MSI data plane, length of returned certificate: 0."
 ```
 
-**✅ Resolution Applied**
-- Enhanced `terraform-import-fix.sh` to include AKS cluster import
-- Added `azurerm_kubernetes_cluster.main` to Phase 4 (Complex Resources)
-- Updated `quick-import-fix.sh` for manual troubleshooting
-- Added AKS cluster to critical resource validation
+**🔧 Solution Applied**
+- Enhanced dependency management in Terraform to ensure proper role assignment timing
+- Added 60-second time delay for managed identity propagation (`time_sleep.wait_for_identity`)
+- Created comprehensive managed identity recovery documentation and scripts
+- Updated AKS cluster dependencies to wait for all role assignments and identity propagation
+
+**📚 New Documentation Created**
+- `MANAGED_IDENTITY_FIX.md` - Comprehensive analysis and solutions for identity credential issues  
+- `scripts/terraform/managed-identity-recovery.sh` - Recovery script for identity issues
+
+### Root Cause Analysis
+
+The managed identity credential reconciliation failure typically occurs due to:
+1. **Timing Issues**: Principal ID hasn't fully propagated across Azure infrastructure
+2. **Permission Issues**: Role assignments not applied before AKS cluster creation
+3. **MSI Data Plane Issues**: Azure's internal managed service identity issues
+4. **Resource Dependencies**: Insufficient wait time between identity creation and usage
 
 ### Latest Enhancements (Latest Commit: PENDING)
 

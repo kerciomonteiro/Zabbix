@@ -74,3 +74,15 @@ resource "azurerm_role_assignment" "agic_contributor" {
   principal_id         = "1db234fc-dabc-4ead-a0a4-6fdc08cdb0aa"  # AGIC identity object ID
   principal_type       = "ServicePrincipal"
 }
+
+# Wait for managed identity principal to be fully propagated
+resource "time_sleep" "wait_for_identity" {
+  depends_on = [
+    azurerm_user_assigned_identity.aks,
+    azurerm_role_assignment.aks_identity_contributor,
+    azurerm_role_assignment.aks_identity_network_contributor,
+    azurerm_role_assignment.aks_identity_acr_pull,
+  ]
+  
+  create_duration = "60s"
+}

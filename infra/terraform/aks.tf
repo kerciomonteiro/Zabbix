@@ -99,7 +99,11 @@ resource "azurerm_kubernetes_cluster" "main" {
 
   depends_on = [
     azurerm_user_assigned_identity.aks,
+    azurerm_role_assignment.aks_identity_contributor,
+    azurerm_role_assignment.aks_identity_network_contributor,
+    azurerm_role_assignment.aks_identity_acr_pull,
     azurerm_application_gateway.main,
+    time_sleep.wait_for_identity,
   ]
 }
 
