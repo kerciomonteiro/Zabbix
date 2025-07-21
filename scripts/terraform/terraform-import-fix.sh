@@ -197,6 +197,17 @@ else
     fi
 fi
 
+# Import AKS node pool if cluster exists
+echo ""
+echo "==> Attempting to import AKS Node Pool..."
+if terraform state show "azurerm_kubernetes_cluster.main" >/dev/null 2>&1; then
+    try_import "azurerm_kubernetes_cluster_node_pool.user" \
+        "/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.ContainerService/managedClusters/aks-devops-eastus/agentPools/workerpool" \
+        "AKS Node Pool (workerpool)"
+else
+    echo "    [SKIP] AKS cluster not in state - node pool import will be handled later"
+fi
+
 echo ""
 echo "✅ Import fix script completed"
 echo "Note: Resources already in state or not found in Azure were skipped"
@@ -211,6 +222,7 @@ critical_resources=(
     "azurerm_application_insights.main[0]"
     "azurerm_application_gateway.main" 
     "azurerm_kubernetes_cluster.main"
+    "azurerm_kubernetes_cluster_node_pool.user"
     "azurerm_subnet_network_security_group_association.aks" 
     "azurerm_subnet_network_security_group_association.appgw"
 )
