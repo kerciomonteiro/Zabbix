@@ -5,6 +5,14 @@ $newResourceGroup = "rg-devops-pops-eastus"
 # Resources to re-import
 $resources = @(
     @{
+        TerraformResource = "azurerm_log_analytics_workspace.main[0]"
+        AzureResourceId = "/subscriptions/$subscriptionId/resourceGroups/$newResourceGroup/providers/Microsoft.OperationalInsights/workspaces/law-devops-eastus"
+    },
+    @{
+        TerraformResource = "azurerm_container_registry.main"
+        AzureResourceId = "/subscriptions/$subscriptionId/resourceGroups/$newResourceGroup/providers/Microsoft.ContainerRegistry/registries/acrdevopseastus"
+    },
+    @{
         TerraformResource = "azurerm_network_security_group.aks"
         AzureResourceId = "/subscriptions/$subscriptionId/resourceGroups/$newResourceGroup/providers/Microsoft.Network/networkSecurityGroups/nsg-aks-devops-eastus"
     },
