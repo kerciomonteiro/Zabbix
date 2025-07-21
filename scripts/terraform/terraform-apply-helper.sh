@@ -64,6 +64,48 @@ case "$TERRAFORM_MODE" in
         fi
         
         echo "🚀 Applying Terraform plan: $PLAN_FILE"
+        
+        # Pre-apply import step for Kubernetes resources
+        echo ""
+        echo "🔄 Pre-apply: Importing existing Kubernetes resources to prevent conflicts..."
+        set +e  # Don't exit on import errors
+        
+        # Ensure we have AKS credentials
+        CLUSTER_NAME="${AKS_CLUSTER_NAME:-aks-devops-eastus}"
+        RESOURCE_GROUP="${AZURE_RESOURCE_GROUP:-rg-devops-pops-eastus}"
+        
+        echo "   Setting up kubectl credentials for cluster: $CLUSTER_NAME"
+        if az aks get-credentials --resource-group "$RESOURCE_GROUP" --name "$CLUSTER_NAME" --overwrite-existing >/dev/null 2>&1; then
+            echo "   ✅ kubectl credentials configured"
+            
+            # Import known conflicting resources directly
+            echo "   🎯 Importing Kubernetes resources that commonly cause conflicts..."
+            
+            # Import namespace
+            if kubectl get namespace zabbix >/dev/null 2>&1; then
+                echo "     📦 Importing namespace: zabbix"
+                terraform import 'kubernetes_namespace.applications["zabbix"]' "zabbix" >/dev/null 2>&1 || echo "       ⚠️ Namespace import failed (may already be in state)"
+            fi
+            
+            # Import storage classes
+            if kubectl get storageclass standard-ssd >/dev/null 2>&1; then
+                echo "     💾 Importing storage class: standard-ssd"
+                terraform import 'kubernetes_storage_class.workload_storage["standard"]' "standard-ssd" >/dev/null 2>&1 || echo "       ⚠️ Storage class import failed (may already be in state)"
+            fi
+            
+            if kubectl get storageclass fast-ssd >/dev/null 2>&1; then
+                echo "     💾 Importing storage class: fast-ssd"
+                terraform import 'kubernetes_storage_class.workload_storage["fast"]' "fast-ssd" >/dev/null 2>&1 || echo "       ⚠️ Storage class import failed (may already be in state)"
+            fi
+            
+            echo "   ✅ Pre-apply import completed"
+        else
+            echo "   ⚠️ Could not configure kubectl - proceeding with apply (conflicts may occur)"
+        fi
+        
+        set -e  # Re-enable exit on error
+        echo ""
+        
         if terraform apply -auto-approve "$PLAN_FILE"; then
             echo "✅ Terraform deployment successful"
             echo "DEPLOYMENT_SUCCESS=true" >> "$GITHUB_OUTPUT"
