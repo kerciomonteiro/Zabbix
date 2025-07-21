@@ -64,30 +64,35 @@ try_import() {
 
 # Target the specific resources that commonly fail
 echo ""
-echo "🎯 Importing commonly failing resources..."
+echo "🎯 Importing commonly failing resources in dependency order..."
 
-# Application Gateway (from user's error message)
-try_import "azurerm_application_gateway.main" \
-    "/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Network/applicationGateways/appgw-devops-eastus" \
-    "Application Gateway"
+# Phase 1: Identity and Core Resources (must be imported first)
+echo ""
+echo "=== Phase 1: Identity and Core Resources ==="
 
-# Subnet NSG Associations (from user's error message)
-try_import "azurerm_subnet_network_security_group_association.aks" \
-    "/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Network/virtualNetworks/vnet-devops-eastus/subnets/subnet-aks-devops-eastus" \
-    "AKS Subnet NSG Association"
+try_import "azurerm_user_assigned_identity.aks" \
+    "/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-devops-eastus" \
+    "User Assigned Identity"
 
-try_import "azurerm_subnet_network_security_group_association.appgw" \
-    "/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Network/virtualNetworks/vnet-devops-eastus/subnets/subnet-appgw-devops-eastus" \
-    "App Gateway Subnet NSG Association"
-
-# Other critical resources that often need importing
 try_import "azurerm_log_analytics_workspace.main[0]" \
     "/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.OperationalInsights/workspaces/law-devops-eastus" \
     "Log Analytics Workspace"
 
+try_import "azurerm_log_analytics_solution.container_insights[0]" \
+    "/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.OperationsManagement/solutions/ContainerInsights(law-devops-eastus)" \
+    "Container Insights Solution"
+
+try_import "azurerm_application_insights.main[0]" \
+    "/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Insights/components/ai-devops-eastus" \
+    "Application Insights"
+
 try_import "azurerm_container_registry.main" \
     "/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.ContainerRegistry/registries/acrdevopseastus" \
     "Container Registry"
+
+# Phase 2: Network Infrastructure
+echo ""
+echo "=== Phase 2: Network Infrastructure ==="
 
 try_import "azurerm_virtual_network.main" \
     "/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Network/virtualNetworks/vnet-devops-eastus" \
@@ -113,6 +118,26 @@ try_import "azurerm_subnet.appgw" \
     "/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Network/virtualNetworks/vnet-devops-eastus/subnets/subnet-appgw-devops-eastus" \
     "App Gateway Subnet"
 
+# Phase 3: Subnet Associations (depend on subnets and NSGs)
+echo ""
+echo "=== Phase 3: Subnet Network Security Group Associations ==="
+
+try_import "azurerm_subnet_network_security_group_association.aks" \
+    "/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Network/virtualNetworks/vnet-devops-eastus/subnets/subnet-aks-devops-eastus" \
+    "AKS Subnet NSG Association"
+
+try_import "azurerm_subnet_network_security_group_association.appgw" \
+    "/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Network/virtualNetworks/vnet-devops-eastus/subnets/subnet-appgw-devops-eastus" \
+    "App Gateway Subnet NSG Association"
+
+# Phase 4: Complex Resources (depend on all above)
+echo ""
+echo "=== Phase 4: Complex Resources ==="
+
+try_import "azurerm_application_gateway.main" \
+    "/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Network/applicationGateways/appgw-devops-eastus" \
+    "Application Gateway"
+
 echo ""
 echo "✅ Import fix script completed"
 echo "Note: Resources already in state or not found in Azure were skipped"
@@ -121,7 +146,14 @@ echo "Note: Resources already in state or not found in Azure were skipped"
 echo ""
 echo "🔍 Final verification of critical resources..."
 
-critical_resources=("azurerm_application_gateway.main" "azurerm_subnet_network_security_group_association.aks" "azurerm_subnet_network_security_group_association.appgw")
+critical_resources=(
+    "azurerm_user_assigned_identity.aks"
+    "azurerm_log_analytics_solution.container_insights[0]" 
+    "azurerm_application_insights.main[0]"
+    "azurerm_application_gateway.main" 
+    "azurerm_subnet_network_security_group_association.aks" 
+    "azurerm_subnet_network_security_group_association.appgw"
+)
 missing_critical=()
 
 for resource in "${critical_resources[@]}"; do
