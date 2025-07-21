@@ -64,6 +64,10 @@ quick_import "azurerm_application_insights.main[0]" \
     "/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Insights/components/ai-devops-eastus" \
     "Application Insights"
 
+quick_import "azurerm_kubernetes_cluster.main" \
+    "/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.ContainerService/managedClusters/aks-devops-eastus" \
+    "AKS Cluster"
+
 echo ""
 echo "✅ Quick import fix completed!"
 echo ""

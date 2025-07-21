@@ -138,6 +138,10 @@ try_import "azurerm_application_gateway.main" \
     "/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Network/applicationGateways/appgw-devops-eastus" \
     "Application Gateway"
 
+try_import "azurerm_kubernetes_cluster.main" \
+    "/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.ContainerService/managedClusters/aks-devops-eastus" \
+    "AKS Cluster"
+
 echo ""
 echo "✅ Import fix script completed"
 echo "Note: Resources already in state or not found in Azure were skipped"
@@ -151,6 +155,7 @@ critical_resources=(
     "azurerm_log_analytics_solution.container_insights[0]" 
     "azurerm_application_insights.main[0]"
     "azurerm_application_gateway.main" 
+    "azurerm_kubernetes_cluster.main"
     "azurerm_subnet_network_security_group_association.aks" 
     "azurerm_subnet_network_security_group_association.appgw"
 )
