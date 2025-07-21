@@ -41,20 +41,10 @@ spec:
             secretKeyRef:
               name: zabbix-db-secret
               key: mysql-root-password
-        - name: ZBX_JAVAGATEWAY
-          value: "zabbix-java-gateway"
         - name: ZBX_JAVAGATEWAY_ENABLE
-          value: "true"
-        - name: ZBX_STARTJAVAPOLLERS
-          value: "5"
+          value: "false"
         - name: ZBX_ENABLE_SNMP_TRAPS
-          value: "true"
-        - name: ZBX_STARTPROXYPOLLERS
-          value: "1"
-        - name: ZBX_PROXYCONFIGFREQUENCY
-          value: "3600"
-        - name: ZBX_PROXYDATAFREQUENCY
-          value: "1"
+          value: "false"
         # Enable database auto-initialization
         - name: DB_SERVER_ROOT_USER
           value: "root"

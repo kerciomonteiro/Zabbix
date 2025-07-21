@@ -1,0 +1,66 @@
+# GitHub Actions step to be added to your deploy.yml workflow
+# Add this after the Terraform apply step and before the completion
+
+- name: Verify and Fix Zabbix Deployment
+  if: success()
+  run: |
+    echo "🔍 Running post-deployment Zabbix verification and fix..."
+    
+    # Wait for AKS cluster to be ready
+    echo "⏳ Waiting for AKS cluster to be ready..."
+    az aks get-credentials --resource-group rg-devops-pops-eastus --name aks-devops-eastus --overwrite-existing
+    
+    # Wait a bit more for cluster to stabilize
+    sleep 30
+    
+    # Check if cluster is accessible
+    kubectl cluster-info --request-timeout=30s
+    
+    # Run the Zabbix fix script
+    chmod +x ./scripts/terraform/post-deployment-zabbix-fix.sh
+    ./scripts/terraform/post-deployment-zabbix-fix.sh
+    
+    # Additional verification
+    echo "📋 Final Deployment Status:"
+    kubectl get pods -n zabbix
+    kubectl get services -n zabbix
+    
+    echo "✅ Zabbix deployment verification completed"
+  shell: bash
+  env:
+    AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+    AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+    AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+    AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+
+# Alternative PowerShell version for Windows runners
+- name: Verify and Fix Zabbix Deployment (PowerShell)
+  if: success() && runner.os == 'Windows'
+  run: |
+    Write-Host "🔍 Running post-deployment Zabbix verification and fix..." -ForegroundColor Cyan
+    
+    # Wait for AKS cluster to be ready
+    Write-Host "⏳ Waiting for AKS cluster to be ready..." -ForegroundColor Yellow
+    az aks get-credentials --resource-group rg-devops-pops-eastus --name aks-devops-eastus --overwrite-existing
+    
+    # Wait a bit more for cluster to stabilize
+    Start-Sleep -Seconds 30
+    
+    # Check if cluster is accessible
+    kubectl cluster-info --request-timeout=30s
+    
+    # Run the Zabbix fix script
+    ./scripts/terraform/post-deployment-zabbix-fix.ps1
+    
+    # Additional verification
+    Write-Host "📋 Final Deployment Status:" -ForegroundColor Cyan
+    kubectl get pods -n zabbix
+    kubectl get services -n zabbix
+    
+    Write-Host "✅ Zabbix deployment verification completed" -ForegroundColor Green
+  shell: pwsh
+  env:
+    AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+    AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+    AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+    AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}

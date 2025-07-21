@@ -1,0 +1,48 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: zabbix-db-init-final
+  namespace: zabbix
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: zabbix-init
+        image: zabbix/zabbix-server-mysql:5.4-centos-latest
+        env:
+        - name: DB_SERVER_HOST
+          value: "zabbix-mysql"
+        - name: MYSQL_DATABASE
+          value: "zabbix"
+        - name: MYSQL_USER
+          value: "zabbix"
+        - name: MYSQL_PASSWORD
+          value: "zabbix123!"
+        - name: MYSQL_ROOT_PASSWORD
+          value: "ZabbixRoot123!"
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          echo "Dropping and recreating database..."
+          mysql -h "$DB_SERVER_HOST" -u root -p"$MYSQL_ROOT_PASSWORD" -e "
+          DROP DATABASE IF EXISTS $MYSQL_DATABASE;
+          CREATE DATABASE $MYSQL_DATABASE CHARACTER SET utf8 COLLATE utf8_bin;
+          GRANT ALL PRIVILEGES ON $MYSQL_DATABASE.* TO '$MYSQL_USER'@'%';
+          FLUSH PRIVILEGES;
+          "
+          echo "Importing Zabbix schema..."
+          zcat /usr/share/doc/zabbix-server-mysql/create.sql.gz | mysql -h "$DB_SERVER_HOST" -u "$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE"
+          echo "Checking import results..."
+          mysql -h "$DB_SERVER_HOST" -u "$MYSQL_USER" -p"$MYSQL_PASSWORD" -e "
+          SELECT COUNT(*) AS table_count FROM information_schema.tables WHERE table_schema = '$MYSQL_DATABASE';
+          SELECT COUNT(*) AS user_count FROM $MYSQL_DATABASE.users;
+          "
+          echo "Database initialization complete!"
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"

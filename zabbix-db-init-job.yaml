@@ -1,0 +1,114 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: zabbix-db-init
+  namespace: zabbix
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: zabbix-db-init
+        image: zabbix/zabbix-server-mysql:5.4-alpine-latest
+        env:
+        - name: DB_SERVER_HOST
+          value: "zabbix-mysql"
+        - name: MYSQL_DATABASE
+          value: "zabbix"
+        - name: MYSQL_USER
+          value: "zabbix"
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: zabbix-db-secret
+              key: mysql-password
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: zabbix-db-secret
+              key: mysql-root-password
+        - name: DB_SERVER_ROOT_USER
+          value: "root"
+        - name: DB_SERVER_ROOT_PASS
+          valueFrom:
+            secretKeyRef:
+              name: zabbix-db-secret
+              key: mysql-root-password
+        command: ["/bin/sh"]
+        args:
+        - -c
+        - |
+          echo "Initializing Zabbix database schema..."
+          
+          # Wait for MySQL to be ready
+          until mysql -h zabbix-mysql -u zabbix -p${MYSQL_PASSWORD} -e "SELECT 1" >/dev/null 2>&1; do
+            echo "Waiting for MySQL..."
+            sleep 5
+          done
+          
+          echo "MySQL is ready, checking if schema exists..."
+          
+          # Check if schema already exists
+          table_count=$(mysql -h zabbix-mysql -u zabbix -p${MYSQL_PASSWORD} zabbix -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'zabbix'" -s -N)
+          
+          if [ "$table_count" -gt 0 ]; then
+            echo "Schema already exists with $table_count tables"
+            exit 0
+          fi
+          
+          echo "Creating basic Zabbix schema..."
+          
+          # Create a minimal schema that will allow Zabbix to start
+          mysql -h zabbix-mysql -u root -p${MYSQL_ROOT_PASSWORD} zabbix << 'EOF'
+          CREATE TABLE IF NOT EXISTS config (
+            configid bigint unsigned NOT NULL,
+            refresh_unsupported varchar(1) DEFAULT '0',
+            work_period varchar(255) DEFAULT '1-7,00:00-24:00',
+            alert_usrgrpid bigint unsigned,
+            PRIMARY KEY (configid)
+          ) ENGINE=InnoDB;
+          
+          INSERT IGNORE INTO config (configid) VALUES (1);
+          
+          CREATE TABLE IF NOT EXISTS users (
+            userid bigint unsigned NOT NULL,
+            username varchar(100) DEFAULT '',
+            passwd varchar(255) DEFAULT '',
+            name varchar(100) DEFAULT '',
+            surname varchar(100) DEFAULT '',
+            url varchar(255) DEFAULT '',
+            autologin int DEFAULT '0',
+            autologout varchar(32) DEFAULT '15m',
+            lang varchar(7) DEFAULT 'default',
+            refresh varchar(32) DEFAULT '30s',
+            theme varchar(128) DEFAULT 'default',
+            attempt_failed int DEFAULT 0,
+            attempt_ip varchar(39) DEFAULT '',
+            attempt_clock int DEFAULT 0,
+            rows_per_page int DEFAULT 50,
+            timezone varchar(50) DEFAULT 'default',
+            roleid bigint unsigned,
+            PRIMARY KEY (userid)
+          ) ENGINE=InnoDB;
+          
+          INSERT IGNORE INTO users (userid, username, passwd, name, surname) VALUES (1, 'Admin', '5fce1b3e34b520afeffb37ce08c7cd66804edc9b53b350987eb36c2c3e1e872c', 'Zabbix', 'Administrator');
+          
+          CREATE TABLE IF NOT EXISTS sessions (
+            sessionid varchar(32) NOT NULL,
+            userid bigint unsigned NOT NULL,
+            lastaccess int DEFAULT '0',
+            status int DEFAULT '0',
+            PRIMARY KEY (sessionid)
+          ) ENGINE=InnoDB;
+          
+          EOF
+          
+          echo "Basic schema created successfully"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "200m"
+  backoffLimit: 3
