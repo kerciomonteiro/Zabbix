@@ -19,13 +19,13 @@ terraform init
 # Step 2: Disable Kubernetes provider for import
 echo ""
 echo "=== STEP 2: Disable Kubernetes Provider ==="
-./terraform-provider-helper.sh disable
+../../scripts/terraform/terraform-provider-helper.sh disable
 
 # Step 3: Import existing resources
 echo ""
 echo "=== STEP 3: Import Azure Resources ==="
 set +e  # Don't exit on import errors initially
-./terraform-import-helper.sh
+../../scripts/terraform/terraform-import-helper.sh
 IMPORT_EXIT_CODE=$?
 set -e
 
@@ -42,7 +42,7 @@ echo ""
 echo "=== STEP 4: Enable Kubernetes Provider ==="
 if terraform state show "azurerm_kubernetes_cluster.main" >/dev/null 2>&1; then
     echo "✅ AKS cluster found in state - enabling Kubernetes provider"
-    ./terraform-provider-helper.sh enable
+    ../../scripts/terraform/terraform-provider-helper.sh enable
 else
     echo "⚠️ AKS cluster not found in state - keeping Kubernetes provider disabled"
 fi
@@ -50,12 +50,12 @@ fi
 # Step 5: Validate and create plan
 echo ""
 echo "=== STEP 5: Terraform Planning ==="
-./terraform-plan-helper.sh
+../../scripts/terraform/terraform-plan-helper.sh
 
 # Step 6: Apply based on mode
 echo ""
 echo "=== STEP 6: Terraform Apply ==="
-./terraform-apply-helper.sh "$TERRAFORM_MODE" "$PLAN_FILE"
+../../scripts/terraform/terraform-apply-helper.sh "$TERRAFORM_MODE" "$PLAN_FILE"
 
 echo ""
 echo "✅ Terraform deployment orchestration completed successfully!"
