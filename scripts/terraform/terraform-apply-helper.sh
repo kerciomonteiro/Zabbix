@@ -41,6 +41,24 @@ case "$TERRAFORM_MODE" in
         # plan-and-apply mode
         if [ -z "$PLAN_FILE" ]; then
             echo "❌ No plan file specified for apply"
+            echo "🔍 Trying to find most recent plan file..."
+            PLAN_FILE=$(ls -t tfplan-* 2>/dev/null | head -n 1 || echo "")
+            if [ -z "$PLAN_FILE" ]; then
+                echo "❌ No plan files found in current directory"
+                echo "📁 Current directory contents:"
+                ls -la
+                echo "DEPLOYMENT_SUCCESS=false" >> "$GITHUB_OUTPUT"
+                exit 1
+            else
+                echo "✅ Found plan file: $PLAN_FILE"
+            fi
+        fi
+        
+        # Check if plan file actually exists
+        if [ ! -f "$PLAN_FILE" ]; then
+            echo "❌ Plan file does not exist: $PLAN_FILE"
+            echo "📁 Available plan files:"
+            ls -la tfplan-* 2>/dev/null || echo "No plan files found"
             echo "DEPLOYMENT_SUCCESS=false" >> "$GITHUB_OUTPUT"
             exit 1
         fi

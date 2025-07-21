@@ -52,6 +52,24 @@ echo ""
 echo "=== STEP 5: Terraform Planning ==="
 ../../scripts/terraform/terraform-plan-helper.sh
 
+# Capture the plan file name - try multiple methods
+PLAN_FILE=""
+# Method 1: Check if there's a plan file info written by the plan helper
+if [ -f ".terraform-plan-file" ]; then
+    PLAN_FILE=$(cat .terraform-plan-file)
+    echo "Found plan file from info file: $PLAN_FILE"
+elif [ -n "${GITHUB_ENV:-}" ] && [ -f "$GITHUB_ENV" ]; then
+    # Method 2: Try to get from GitHub environment file
+    PLAN_FILE=$(grep 'PLAN_FILE=' "$GITHUB_ENV" 2>/dev/null | cut -d'=' -f2 | tail -1)
+    echo "Found plan file from GitHub ENV: $PLAN_FILE"
+else
+    # Method 3: Fallback - find the most recent plan file
+    PLAN_FILE=$(ls -t tfplan-* 2>/dev/null | head -n 1 || echo "")
+    echo "Found plan file from directory listing: $PLAN_FILE"
+fi
+
+echo "Using plan file: $PLAN_FILE"
+
 # Step 6: Apply based on mode
 echo ""
 echo "=== STEP 6: Terraform Apply ==="
@@ -59,3 +77,6 @@ echo "=== STEP 6: Terraform Apply ==="
 
 echo ""
 echo "✅ Terraform deployment orchestration completed successfully!"
+
+# Cleanup temporary files
+rm -f .terraform-plan-file 2>/dev/null || true

@@ -15,6 +15,10 @@ echo "✅ Terraform configuration is valid"
 PLAN_FILE="tfplan-${GITHUB_RUN_NUMBER:-$(date +%s)}-$(date +%s)"
 echo "PLAN_FILE=$PLAN_FILE" >> "$GITHUB_ENV"
 
+# Also write to a local file for the master script to read
+echo "$PLAN_FILE" > .terraform-plan-file
+echo "Plan file name saved: $PLAN_FILE"
+
 # Create plan
 echo "📋 Creating Terraform plan after import..."
 set +e  # Don't exit on plan errors
