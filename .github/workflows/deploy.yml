@@ -532,41 +532,76 @@ jobs:
       run: |
         echo "🚀 Installing Application Gateway Ingress Controller (AGIC)..."
         
-        # Calculate Application Gateway name
-        APPGW_NAME="appgw-devops-eastus"
-        echo "Using Application Gateway: $APPGW_NAME"
+        # Get Application Gateway name from Terraform outputs or use default
+        if [ -f "infra/terraform/terraform.tfstate" ]; then
+          APPGW_NAME=$(cd infra/terraform && terraform output -raw APPLICATION_GATEWAY_NAME 2>/dev/null || echo "")
+        fi
         
-        # Add AGIC Helm repository
-        helm repo add application-gateway-kubernetes-ingress https://appgwingress.blob.core.windows.net/ingress-azure-helm-package/
-        helm repo update
+        if [ -z "$APPGW_NAME" ]; then
+          APPGW_NAME="appgw-devops-eastus"
+          echo "⚠️ Could not retrieve APPGW name from Terraform, using default: $APPGW_NAME"
+        else
+          echo "✅ Retrieved Application Gateway name from Terraform: $APPGW_NAME"
+        fi
         
-        # Create namespace for AGIC
-        kubectl create namespace agic --dry-run=client -o yaml | kubectl apply -f -
+        # Check if AGIC addon is already enabled
+        AGIC_STATUS=$(az aks addon show \
+          --name ${{ env.AKS_CLUSTER_NAME }} \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --addon ingress-appgw \
+          --query "enabled" \
+          -o tsv 2>/dev/null || echo "false")
         
-        # Install AGIC
-        helm install agic application-gateway-kubernetes-ingress/ingress-azure \
-          --namespace agic \
-          --set appgw.name=$APPGW_NAME \
-          --set appgw.resourceGroup=${{ env.AZURE_RESOURCE_GROUP }} \
-          --set appgw.subscriptionId=${{ env.AZURE_SUBSCRIPTION_ID }} \
-          --set appgw.usePrivateIP=false \
-          --set kubernetes.watchNamespace=zabbix \
-          --set armAuth.type=servicePrincipal \
-          --set armAuth.secretJSON=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | base64 -w0) \
-          --wait || {
-          echo "⚠️ AGIC installation failed, falling back to NGINX Ingress..."
+        if [ "$AGIC_STATUS" = "true" ]; then
+          echo "✅ AGIC addon is already enabled on the AKS cluster"
+        else
+          echo "📦 Installing AGIC using AKS addon (modern approach)..."
           
-          # Fallback to NGINX Ingress Controller
-          helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
-          helm repo update
-          
-          helm install ingress-nginx ingress-nginx/ingress-nginx \
-            --namespace ingress-nginx \
-            --create-namespace \
-            --set controller.replicaCount=2 \
-            --set controller.service.type=LoadBalancer \
-            --set controller.service.annotations."service\.beta\.kubernetes\.io/azure-load-balancer-health-probe-request-path"=/healthz \
-            --wait
+          # Enable AGIC addon on AKS cluster
+          az aks addon enable \
+            --name ${{ env.AKS_CLUSTER_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --addon ingress-appgw \
+            --appgw-name $APPGW_NAME || {
+            echo "⚠️ AGIC addon installation failed, attempting manual configuration..."
+            
+            # Try to install AGIC using Azure CLI with existing App Gateway
+            echo "🔧 Attempting to use existing Application Gateway..."
+            APPGW_ID="/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.Network/applicationGateways/$APPGW_NAME"
+            
+            az aks addon enable \
+              --name ${{ env.AKS_CLUSTER_NAME }} \
+              --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+              --addon ingress-appgw \
+              --appgw-id "$APPGW_ID" || {
+              echo "⚠️ All AGIC methods failed, falling back to NGINX Ingress..."
+              
+              # Check if NGINX Ingress is already installed
+              if helm list -n ingress-nginx | grep -q "ingress-nginx"; then
+                echo "✅ NGINX Ingress is already installed"
+              else
+                echo "📦 Installing NGINX Ingress Controller..."
+                # Fallback to NGINX Ingress Controller
+                helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+                helm repo update
+                
+                helm install ingress-nginx ingress-nginx/ingress-nginx \
+                  --namespace ingress-nginx \
+                  --create-namespace \
+                  --set controller.replicaCount=2 \
+                  --set controller.service.type=LoadBalancer \
+                  --set controller.service.annotations."service\.beta\.kubernetes\.io/azure-load-balancer-health-probe-request-path"=/healthz \
+                  --wait
+              fi
+            }
+          }
+        fi
+        
+        # Verify AGIC installation
+        echo "🔍 Verifying ingress controller installation..."
+        kubectl get pods -n kube-system -l app=ingress-appgw || {
+          echo "AGIC not found in kube-system, checking other namespaces..."
+          kubectl get pods --all-namespaces | grep -E "(ingress|agic)" || echo "No ingress controllers found"
         }
         
         echo "✅ Ingress controller installation completed"

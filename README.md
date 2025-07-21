@@ -601,11 +601,20 @@ The deployment experienced and successfully resolved a 502 Bad Gateway issue. Th
 - **[FINAL-ROOT-CAUSE-ANALYSIS.md](FINAL-ROOT-CAUSE-ANALYSIS.md)** - Detailed root cause analysis
 - **[applications/zabbix/k8s/TROUBLESHOOTING-SUMMARY.md](applications/zabbix/k8s/TROUBLESHOOTING-SUMMARY.md)** - Quick reference
 
+### AGIC Installation Issues ✅
+
+**Status**: **RESOLVED** - Modern Azure CLI approach implemented
+
+The workflow now uses the modern Azure CLI AKS addon method for installing Application Gateway Ingress Controller (AGIC) instead of the deprecated Helm repository. See:
+
+- **[AGIC_INSTALLATION_FIX.md](AGIC_INSTALLATION_FIX.md)** - Complete AGIC installation fix documentation
+
 **Root Causes Identified and Fixed**:
 1. **AGIC Permissions** - Missing Network Contributor role on VNet/subnet
 2. **Network Policies** - Blocking traffic from kube-system namespace
 3. **LoadBalancer Health Checks** - Using TCP instead of HTTP probes
 4. **NSG Rules** - Missing rules for NodePort ranges
+5. **AGIC Installation** - Replaced deprecated Helm repo with Azure CLI AKS addon
 
 **Key Learnings**:
 - Always check AGIC pod logs for permission errors
