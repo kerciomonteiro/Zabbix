@@ -11,6 +11,20 @@ echo "🚀 Starting Terraform deployment orchestration..."
 echo "Mode: $TERRAFORM_MODE"
 echo "Debug: $DEBUG_MODE"
 
+# Validate required environment variables for import process
+if [[ -z "$AZURE_SUBSCRIPTION_ID" || -z "$AZURE_RESOURCE_GROUP" ]]; then
+    echo "❌ Error: Required environment variables for import missing"
+    echo "   AZURE_SUBSCRIPTION_ID: ${AZURE_SUBSCRIPTION_ID:-'Not set'}"
+    echo "   AZURE_RESOURCE_GROUP: ${AZURE_RESOURCE_GROUP:-'Not set'}"
+    echo ""
+    echo "ℹ️  These variables are needed for resource import functionality"
+    echo "   Continuing without import capability..."
+    SKIP_IMPORT="true"
+else
+    echo "✅ Environment variables validated for import process"
+    SKIP_IMPORT="false"
+fi
+
 # Step 1: Initialize and disable provider
 echo ""
 echo "=== STEP 1: Terraform Initialization ==="
@@ -21,20 +35,61 @@ echo ""
 echo "=== STEP 2: Disable Kubernetes Provider ==="
 ../../scripts/terraform/terraform-provider-helper.sh disable
 
-# Step 3: Import existing resources
+# Step 3: Import existing resources (Critical Step)
 echo ""
 echo "=== STEP 3: Import Azure Resources ==="
-set +e  # Don't exit on import errors initially
-../../scripts/terraform/terraform-import-helper.sh
-IMPORT_EXIT_CODE=$?
-set -e
 
-if [ $IMPORT_EXIT_CODE -ne 0 ]; then
-    echo "⚠️ Import process encountered issues but continuing..."
-    echo "IMPORT_SUCCESS=partial" >> "$GITHUB_OUTPUT"
+if [ "$SKIP_IMPORT" = "true" ]; then
+    echo "⚠️ Skipping import due to missing environment variables"
+    echo "IMPORT_SUCCESS=skipped" >> "$GITHUB_OUTPUT"
 else
-    echo "✅ Import process completed successfully"
-    echo "IMPORT_SUCCESS=true" >> "$GITHUB_OUTPUT"
+    # First attempt - try standard import
+    set +e  # Don't exit on import errors initially
+    ../../scripts/terraform/terraform-import-helper.sh
+    IMPORT_EXIT_CODE=$?
+    set -e
+
+    # Enhanced import handling - retry critical resources if import failed
+    if [ $IMPORT_EXIT_CODE -ne 0 ]; then
+        echo "⚠️ Initial import process failed - attempting targeted recovery..."
+        
+        # List of critical resources that must be imported to avoid conflicts
+        declare -a critical_resources=(
+            "azurerm_log_analytics_workspace.main[0]|/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.OperationalInsights/workspaces/law-devops-eastus|Log Analytics Workspace"
+            "azurerm_container_registry.main|/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.ContainerRegistry/registries/acrdevopseastus|Container Registry"  
+            "azurerm_network_security_group.aks|/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Network/networkSecurityGroups/nsg-aks-devops-eastus|AKS NSG"
+            "azurerm_network_security_group.appgw|/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Network/networkSecurityGroups/nsg-appgw-devops-eastus|App Gateway NSG"
+            "azurerm_virtual_network.main|/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Network/virtualNetworks/vnet-devops-eastus|Virtual Network"
+            "azurerm_public_ip.appgw|/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Network/publicIPAddresses/pip-appgw-devops-eastus|Public IP"
+        )
+        
+        echo "🔄 Attempting targeted import of critical resources..."
+        for resource_info in "${critical_resources[@]}"; do
+            IFS='|' read -r tf_resource azure_id display_name <<< "$resource_info"
+            
+            # Check if resource exists and needs import
+            if ! terraform state show "$tf_resource" >/dev/null 2>&1; then
+                if az resource show --ids "$azure_id" >/dev/null 2>&1; then
+                    echo "⚡ Importing critical resource: $display_name"
+                    set +e
+                    terraform import "$tf_resource" "$azure_id" 2>/dev/null
+                    if [ $? -eq 0 ]; then
+                        echo "  ✅ Successfully imported $display_name"
+                    else
+                        echo "  ❌ Failed to import $display_name - will attempt plan anyway"
+                    fi
+                    set -e
+                fi
+            else
+                echo "  ✅ $display_name already in state"
+            fi
+        done
+        
+        echo "IMPORT_SUCCESS=partial" >> "$GITHUB_OUTPUT"
+    else
+        echo "✅ Import process completed successfully"
+        echo "IMPORT_SUCCESS=true" >> "$GITHUB_OUTPUT"
+    fi
 fi
 
 # Step 4: Re-enable Kubernetes provider
