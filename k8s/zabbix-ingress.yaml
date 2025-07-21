@@ -1,0 +1,52 @@
+# NGINX Ingress for Zabbix
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: zabbix-ingress
+  namespace: zabbix
+  annotations:
+    # NGINX Ingress Controller specific annotations
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/rewrite-target: /
+  labels:
+    app: zabbix-ingress
+spec:
+  # Uncomment when you configure your SSL certificate
+  # tls:
+  # - hosts:
+  #   - dal2-devmon-mgt.forescout.com
+  #   secretName: zabbix-tls-secret
+  rules:
+  - host: dal2-devmon-mgt.forescout.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: zabbix-web
+            port:
+              number: 80
+
+---
+# Service for Application Gateway Backend Pool
+apiVersion: v1
+kind: Service
+metadata:
+  name: zabbix-web-external
+  namespace: zabbix
+  labels:
+    app: zabbix-web
+spec:
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+    protocol: TCP
+  selector:
+    app: zabbix-web
+  type: LoadBalancer
+  loadBalancerSourceRanges:
+  - 0.0.0.0/0  # Allow access from anywhere - restrict as needed

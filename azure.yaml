@@ -1,0 +1,48 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
+
+# ⚠️ DEPRECATED: This file is deprecated and no longer used for deployments
+# The GitHub Actions workflow now uses Terraform (recommended) and ARM templates
+# This file is kept for reference only
+
+name: zabbix-aks-deployment
+metadata:
+  template: zabbix-aks-deployment@0.0.1-beta
+
+# Infrastructure only - Kubernetes manifests will be deployed separately
+infra:
+  provider: bicep
+  path: ./infra
+
+# Hooks
+hooks:
+  postdeploy:
+    windows:
+      shell: pwsh
+      run: |
+        Write-Host "Infrastructure deployment completed!"
+        Write-Host "Now deploying Kubernetes manifests..."
+        
+        # Get AKS credentials
+        $aksName = az aks list --resource-group $env:AZURE_RESOURCE_GROUP --query "[0].name" --output tsv
+        az aks get-credentials --resource-group $env:AZURE_RESOURCE_GROUP --name $aksName --overwrite-existing
+        
+        # Deploy Kubernetes manifests
+        kubectl apply -f k8s/
+        
+        Write-Host "Deployment completed! Zabbix will be available at https://dal2-devmon-mgt.forescout.com"
+        Write-Host "Please configure your DNS to point dal2-devmon-mgt.forescout.com to the Application Gateway IP"
+    posix:
+      shell: sh
+      run: |
+        echo "Infrastructure deployment completed!"
+        echo "Now deploying Kubernetes manifests..."
+        
+        # Get AKS credentials
+        aksName=$(az aks list --resource-group $AZURE_RESOURCE_GROUP --query "[0].name" --output tsv)
+        az aks get-credentials --resource-group $AZURE_RESOURCE_GROUP --name $aksName --overwrite-existing
+        
+        # Deploy Kubernetes manifests
+        kubectl apply -f k8s/
+        
+        echo "Deployment completed! Zabbix will be available at https://dal2-devmon-mgt.forescout.com"
+        echo "Please configure your DNS to point dal2-devmon-mgt.forescout.com to the load balancer IP"

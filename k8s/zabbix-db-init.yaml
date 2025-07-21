@@ -1,0 +1,154 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: zabbix-db-init
+  namespace: zabbix
+  labels:
+    app: zabbix-db-init
+spec:
+  template:
+    metadata:
+      labels:
+        app: zabbix-db-init
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: zabbix-db-init
+        image: zabbix/zabbix-server-mysql:alpine-6.0-latest
+        command: 
+        - /bin/bash
+        - -c
+        - |
+          echo "Initializing Zabbix database..."
+          
+          # Wait for MySQL to be ready
+          until mysql -h zabbix-mysql -u zabbix -pzabbix_password -e "SELECT 1" > /dev/null 2>&1; do
+            echo "Waiting for MySQL to be ready..."
+            sleep 5
+          done
+          
+          echo "MySQL is ready, checking if database is already initialized..."
+          
+          # Check if database is already initialized
+          TABLES_COUNT=$(mysql -h zabbix-mysql -u zabbix -pzabbix_password -D zabbix -e "SHOW TABLES;" 2>/dev/null | wc -l)
+          
+          if [ "$TABLES_COUNT" -gt 1 ]; then
+            echo "Database already initialized with $TABLES_COUNT tables"
+            exit 0
+          fi
+          
+          echo "Database is empty, initializing with Zabbix schema..."
+          
+          # Initialize database with Zabbix schema
+          mysql -h zabbix-mysql -u zabbix -pzabbix_password zabbix < /usr/share/doc/zabbix-server-mysql*/create.sql.gz
+          
+          if [ $? -eq 0 ]; then
+            echo "Database initialization completed successfully"
+          else
+            echo "Database initialization failed"
+            exit 1
+          fi
+        env:
+        - name: MYSQL_HOST
+          value: "zabbix-mysql"
+        - name: MYSQL_DATABASE
+          value: "zabbix"
+        - name: MYSQL_USER
+          value: "zabbix"
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: zabbix-db-secret
+              key: mysql-password
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: zabbix-schema-init
+  namespace: zabbix
+  labels:
+    app: zabbix-schema-init
+spec:
+  template:
+    metadata:
+      labels:
+        app: zabbix-schema-init
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: mysql-client
+        image: mysql:8.0
+        command: 
+        - /bin/bash
+        - -c
+        - |
+          echo "Waiting for MySQL to be ready..."
+          until mysql -h zabbix-mysql -u zabbix -pzabbix_password -e "SELECT 1" > /dev/null 2>&1; do
+            echo "Still waiting for MySQL..."
+            sleep 10
+          done
+          
+          echo "MySQL is ready, checking database contents..."
+          TABLES_COUNT=$(mysql -h zabbix-mysql -u zabbix -pzabbix_password -D zabbix -e "SHOW TABLES;" 2>/dev/null | wc -l)
+          echo "Found $TABLES_COUNT tables in database"
+          
+          if [ "$TABLES_COUNT" -gt 5 ]; then
+            echo "Database appears to be initialized already"
+            exit 0
+          fi
+          
+          echo "Initializing Zabbix database schema..."
+          
+          # Download and extract Zabbix schema
+          cd /tmp
+          wget -q https://repo.zabbix.com/zabbix/6.0/ubuntu/pool/main/z/zabbix/zabbix-server-mysql_6.0.40-1+ubuntu22.04_amd64.deb
+          ar x zabbix-server-mysql_6.0.40-1+ubuntu22.04_amd64.deb
+          tar xf data.tar.xz
+          
+          # Find and import schema
+          SCHEMA_FILE=$(find . -name "*.sql.gz" | head -1)
+          if [ -n "$SCHEMA_FILE" ]; then
+            echo "Found schema file: $SCHEMA_FILE"
+            zcat "$SCHEMA_FILE" | mysql -h zabbix-mysql -u zabbix -pzabbix_password zabbix
+            echo "Schema imported successfully"
+          else
+            echo "No schema file found, trying alternative method..."
+            # Alternative: Create basic required tables
+            mysql -h zabbix-mysql -u zabbix -pzabbix_password zabbix << 'EOF'
+CREATE TABLE IF NOT EXISTS users (
+  userid bigint unsigned NOT NULL AUTO_INCREMENT,
+  username varchar(100) NOT NULL DEFAULT '',
+  name varchar(100) NOT NULL DEFAULT '',
+  surname varchar(100) NOT NULL DEFAULT '',
+  passwd char(32) NOT NULL DEFAULT '',
+  url varchar(255) NOT NULL DEFAULT '',
+  autologin int NOT NULL DEFAULT '0',
+  autologout varchar(32) NOT NULL DEFAULT '15m',
+  lang varchar(7) NOT NULL DEFAULT 'default',
+  refresh varchar(32) NOT NULL DEFAULT '30s',
+  theme varchar(128) NOT NULL DEFAULT 'default',
+  attempt_failed int NOT NULL DEFAULT 0,
+  attempt_ip varchar(39) NOT NULL DEFAULT '',
+  attempt_clock int NOT NULL DEFAULT 0,
+  rows_per_page int NOT NULL DEFAULT 50,
+  timezone varchar(50) NOT NULL DEFAULT 'default',
+  role_id bigint unsigned NOT NULL,
+  usrgrpid bigint unsigned,
+  PRIMARY KEY (userid),
+  UNIQUE KEY users_1 (username)
+);
+
+INSERT INTO users (userid,username,name,surname,passwd,url,autologin,autologout,lang,refresh,theme,attempt_failed,attempt_ip,attempt_clock,rows_per_page,timezone,role_id,usrgrpid) VALUES (1,'Admin','Zabbix','Administrator','5fce1b3e34b520afeffb37ce08c7cd66','',0,'15m','en_US','30s','default',0,'',0,50,'default',3,7);
+EOF
+          fi
+          
+          echo "Database initialization completed"
+        env:
+        - name: MYSQL_HOST
+          value: "zabbix-mysql"
+        - name: MYSQL_DATABASE  
+          value: "zabbix"
+        - name: MYSQL_USER
+          value: "zabbix"
+        - name: MYSQL_PASSWORD
+          value: "zabbix_password"
