@@ -254,6 +254,13 @@ jobs:
         echo "📦 Initializing Terraform..."
         terraform init
 
+    - name: Set Script Permissions
+      if: ${{ env.INFRASTRUCTURE_METHOD == 'terraform' || env.INFRASTRUCTURE_METHOD == 'both' }}
+      run: |
+        # Make all Terraform helper scripts executable
+        chmod +x scripts/terraform/*.sh
+        echo "✅ Script permissions set"
+
     - name: Deploy Infrastructure with Terraform
       id: terraform-deploy
       if: ${{ env.INFRASTRUCTURE_METHOD == 'terraform' || env.INFRASTRUCTURE_METHOD == 'both' }}

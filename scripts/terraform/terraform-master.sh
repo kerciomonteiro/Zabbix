@@ -11,9 +11,6 @@ echo "🚀 Starting Terraform deployment orchestration..."
 echo "Mode: $TERRAFORM_MODE"
 echo "Debug: $DEBUG_MODE"
 
-# Make all helper scripts executable (they're in the same directory)
-chmod +x ./terraform-*.sh
-
 # Step 1: Initialize and disable provider
 echo ""
 echo "=== STEP 1: Terraform Initialization ==="
