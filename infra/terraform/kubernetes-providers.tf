@@ -2,13 +2,6 @@
 # This file contains the Kubernetes and Helm provider configurations
 # Updated to handle AKS cluster readiness and prevent connectivity issues
 
-# Wait for AKS cluster to be fully ready before configuring Kubernetes resources
-resource "time_sleep" "wait_for_cluster" {
-  depends_on = [azurerm_kubernetes_cluster.main]
-  
-  create_duration = "30s"
-}
-
 # Configure Kubernetes provider
 provider "kubernetes" {
   host                   = azurerm_kubernetes_cluster.main.kube_config.0.host

@@ -86,3 +86,10 @@ resource "time_sleep" "wait_for_identity" {
   
   create_duration = "60s"
 }
+
+# Wait for AKS cluster to be fully ready before configuring Kubernetes resources
+resource "time_sleep" "wait_for_cluster" {
+  depends_on = [azurerm_kubernetes_cluster.main]
+  
+  create_duration = "30s"
+}
