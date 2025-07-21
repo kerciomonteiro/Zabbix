@@ -89,6 +89,7 @@ jobs:
       aks-cluster-name: ${{ steps.deploy-infra.outputs.AKS_CLUSTER_NAME }}
       resource-group: ${{ steps.deploy-infra.outputs.AZURE_RESOURCE_GROUP }}
       container-registry: ${{ steps.deploy-infra.outputs.CONTAINER_REGISTRY_ENDPOINT }}
+      deployment-success: ${{ steps.deploy-infra.outputs.DEPLOYMENT_SUCCESS }}
     
     steps:
     - name: Checkout code
@@ -395,16 +396,32 @@ jobs:
     - name: Set Infrastructure Outputs
       id: deploy-infra
       run: |
-        # Use outputs from whichever deployment method succeeded
-        if [ "${{ steps.terraform-deploy.outputs.DEPLOYMENT_SUCCESS }}" = "true" ]; then
-          echo "Using Terraform deployment outputs"
+        # Handle different deployment modes and methods
+        TF_STATUS="${{ steps.terraform-deploy.outputs.DEPLOYMENT_SUCCESS }}"
+        ARM_STATUS="${{ steps.deploy-infra-arm.outputs.DEPLOYMENT_SUCCESS }}"
+        
+        echo "Terraform status: $TF_STATUS"
+        echo "ARM status: $ARM_STATUS"
+        echo "Terraform mode: ${{ env.TERRAFORM_MODE }}"
+        
+        # Handle Terraform results
+        if [ "$TF_STATUS" = "true" ]; then
+          echo "✅ Using Terraform deployment outputs (full deployment)"
           echo "AKS_CLUSTER_NAME=${{ steps.terraform-deploy.outputs.AKS_CLUSTER_NAME }}" >> $GITHUB_OUTPUT
           echo "AZURE_RESOURCE_GROUP=${{ steps.terraform-deploy.outputs.AZURE_RESOURCE_GROUP }}" >> $GITHUB_OUTPUT
           echo "CONTAINER_REGISTRY_ENDPOINT=${{ steps.terraform-deploy.outputs.CONTAINER_REGISTRY_ENDPOINT }}" >> $GITHUB_OUTPUT
           echo "DEPLOYMENT_SUCCESS=true" >> $GITHUB_OUTPUT
-          echo "✅ Used Terraform for deployment" >> $GITHUB_STEP_SUMMARY
-        elif [ "${{ steps.deploy-infra-arm.outputs.DEPLOYMENT_SUCCESS }}" = "true" ]; then
-          echo "Using ARM template deployment outputs"
+          echo "✅ Used Terraform for full deployment" >> $GITHUB_STEP_SUMMARY
+        elif [ "$TF_STATUS" = "plan-created" ]; then
+          echo "📋 Terraform plan created successfully (plan-only mode)"
+          echo "AKS_CLUSTER_NAME=${{ steps.terraform-deploy.outputs.AKS_CLUSTER_NAME }}" >> $GITHUB_OUTPUT
+          echo "AZURE_RESOURCE_GROUP=${{ steps.terraform-deploy.outputs.AZURE_RESOURCE_GROUP }}" >> $GITHUB_OUTPUT
+          echo "CONTAINER_REGISTRY_ENDPOINT=${{ steps.terraform-deploy.outputs.CONTAINER_REGISTRY_ENDPOINT }}" >> $GITHUB_OUTPUT
+          echo "DEPLOYMENT_SUCCESS=plan-created" >> $GITHUB_OUTPUT
+          echo "📋 Terraform plan created and saved for later apply" >> $GITHUB_STEP_SUMMARY
+          echo "💡 Run with 'apply-existing-plan' mode to deploy the planned infrastructure" >> $GITHUB_STEP_SUMMARY
+        elif [ "$ARM_STATUS" = "true" ]; then
+          echo "✅ Using ARM template deployment outputs"
           echo "AKS_CLUSTER_NAME=${{ steps.deploy-infra-arm.outputs.AKS_CLUSTER_NAME }}" >> $GITHUB_OUTPUT
           echo "AZURE_RESOURCE_GROUP=${{ steps.deploy-infra-arm.outputs.AZURE_RESOURCE_GROUP }}" >> $GITHUB_OUTPUT
           echo "CONTAINER_REGISTRY_ENDPOINT=${{ steps.deploy-infra-arm.outputs.CONTAINER_REGISTRY_ENDPOINT }}" >> $GITHUB_OUTPUT
@@ -412,8 +429,8 @@ jobs:
           echo "✅ Used ARM template for deployment" >> $GITHUB_STEP_SUMMARY
         else
           echo "❌ All deployment methods failed or returned empty outputs" >> $GITHUB_STEP_SUMMARY
-          echo "Terraform success: ${{ steps.terraform-deploy.outputs.DEPLOYMENT_SUCCESS }}"
-          echo "ARM success: ${{ steps.deploy-infra-arm.outputs.DEPLOYMENT_SUCCESS }}"
+          echo "Terraform status: $TF_STATUS"
+          echo "ARM status: $ARM_STATUS"
           echo "DEPLOYMENT_SUCCESS=false" >> $GITHUB_OUTPUT
           exit 1
         fi
@@ -424,6 +441,12 @@ jobs:
         echo "=== Final Deployment Results ==="
         if [ "${{ steps.terraform-deploy.outputs.DEPLOYMENT_SUCCESS }}" = "true" ]; then
           echo "✅ Deployment Method: Terraform"
+          echo "AKS Cluster Name: ${{ steps.terraform-deploy.outputs.AKS_CLUSTER_NAME }}"
+          echo "Resource Group: ${{ steps.terraform-deploy.outputs.AZURE_RESOURCE_GROUP }}"
+          echo "Container Registry: ${{ steps.terraform-deploy.outputs.CONTAINER_REGISTRY_ENDPOINT }}"
+        elif [ "${{ steps.terraform-deploy.outputs.DEPLOYMENT_SUCCESS }}" = "plan-created" ]; then
+          echo "📋 Deployment Method: Terraform (Plan-Only Mode)"
+          echo "Plan Status: Created and saved for later apply"
           echo "AKS Cluster Name: ${{ steps.terraform-deploy.outputs.AKS_CLUSTER_NAME }}"
           echo "Resource Group: ${{ steps.terraform-deploy.outputs.AZURE_RESOURCE_GROUP }}"
           echo "Container Registry: ${{ steps.terraform-deploy.outputs.CONTAINER_REGISTRY_ENDPOINT }}"
@@ -461,7 +484,7 @@ jobs:
     needs: deploy-infrastructure
     runs-on: ubuntu-latest
     environment: production
-    if: ${{ always() && (github.event.inputs.deployment_type == 'full' || github.event.inputs.deployment_type == 'application-only' || github.event.inputs.deployment_type == 'redeploy-clean' || github.event_name == 'push' || github.event_name == 'pull_request') && (needs.deploy-infrastructure.result == 'success' || github.event.inputs.deployment_type == 'application-only') }}
+    if: ${{ always() && (github.event.inputs.deployment_type == 'full' || github.event.inputs.deployment_type == 'application-only' || github.event.inputs.deployment_type == 'redeploy-clean' || github.event_name == 'push' || github.event_name == 'pull_request') && (needs.deploy-infrastructure.result == 'success' || github.event.inputs.deployment_type == 'application-only') && (needs.deploy-infrastructure.outputs.deployment-success == 'true' || github.event.inputs.deployment_type == 'application-only') }}
     
     steps:
     - name: Checkout code
