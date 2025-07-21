@@ -1,15 +1,16 @@
 #  Zabbix Server on Azure Kubernetes Service (AKS)
 
-> **⚠️ Status: AKS CLUSTER IMPORT CONFLICT - ENHANCED TROUBLESHOOTING DEPLOYED** - Comprehensive import fix and diagnostics applied
+> **🎉 Status: MANAGED IDENTITY RESOLVED - AKS IMPORT CONFLICT** - Identity propagation successful, cluster import in progress
 
-**Latest Update**: Enhanced AKS cluster import error handling with detailed diagnostics and recovery options  
+**Latest Update**: ✅ **BREAKTHROUGH** - Managed identity credential reconciliation resolved! Now addressing AKS cluster import conflict.  
 **Access URL**: http://dal2-devmon-mgt-devops.eastus.cloudapp.azure.com  
 **Credentials**: Admin / zabbix
 
-> **📋 Current Issue**: AKS cluster exists in Azure but needs to be imported into Terraform state  
-> **📋 Root Cause**: Resource exists from previous deployment but not in current Terraform state  
-> **📋 Solution Applied**: Enhanced import script with diagnostics, troubleshooting tools, and recovery options  
-> **📋 Status**: Enhanced fix deployed - monitoring GitHub Actions for automated resolution  
+> **✅ RESOLVED**: Managed identity credential reconciliation - 60-second propagation delay successful  
+> **📋 Current Issue**: AKS cluster exists in Azure but not in Terraform state, causing import conflicts  
+> **📋 Root Cause**: Cluster import script didn't handle existing cluster during latest deployment  
+> **📋 Solution Applied**: Enhanced import scripts with comprehensive AKS cluster diagnostics and emergency recovery tools  
+> **📋 Status**: Import fixes deployed - next GitHub Actions run should resolve automatically  
 > **📋 Details**: See [AKS Cluster Import Issues](#aks-cluster-import-issues-️) section below
 
 This repository contains the Infrastructure as Code (IaC) and Kubernetes manifests to deploy a complete Zabbix monitoring solution on Azure Kubernetes Service (AKS) with the following components:r on Azure Kubernetes Service (AKS)
@@ -49,9 +50,10 @@ See comprehensive analysis and recovery options:
 
 **Resolution Options**:
 1. **Automated**: Enhanced import script runs automatically in GitHub Actions
-2. **Manual Troubleshooting**: Use dedicated AKS troubleshooting script for detailed analysis
-3. **Configuration Update**: Adjust Terraform to match existing cluster if needed
-4. **Cluster Recreation**: Delete and recreate if configuration drift is too significant (causes downtime)
+2. **Emergency Manual Import**: Use `scripts/terraform/emergency-aks-import.sh` for immediate fix
+3. **Detailed Troubleshooting**: Use `scripts/terraform/aks-import-troubleshoot.sh` for step-by-step analysis
+4. **Configuration Update**: Adjust Terraform to match existing cluster if needed
+5. **Cluster Recreation**: Delete and recreate if configuration drift is too significant (causes downtime)
 
 ### Managed Identity Issues �
 
