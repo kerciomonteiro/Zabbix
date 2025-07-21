@@ -260,43 +260,113 @@ jobs:
         echo "📦 Attempting to import existing resources..."
         set +e  # Don't exit on import errors
         
-        # Check if resources exist before importing
-        echo "🔍 Checking for existing resources..."
+        # List all resources in the resource group first
+        echo "🔍 Listing all resources in resource group ${{ env.AZURE_RESOURCE_GROUP }}..."
+        az resource list --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" --output table || echo "⚠️ Failed to list resources"
         
-        # Import managed identity
-        if az identity show --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" --name "id-devops-${{ env.AZURE_LOCATION }}" &>/dev/null; then
-          terraform import azurerm_user_assigned_identity.aks "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-devops-${{ env.AZURE_LOCATION }}" 2>/dev/null || echo "⚠️ Failed to import managed identity"
-        else
-          echo "ℹ️ Managed identity doesn't exist, will be created"
-        fi
+        # Check current Terraform state
+        echo "🔍 Current Terraform state:"
+        terraform state list || echo "No resources in state yet"
         
-        # Import Application Gateway
-        if az network application-gateway show --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" --name "appgw-devops-${{ env.AZURE_LOCATION }}" &>/dev/null; then
-          terraform import azurerm_application_gateway.main "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.Network/applicationGateways/appgw-devops-${{ env.AZURE_LOCATION }}" 2>/dev/null || echo "⚠️ Failed to import Application Gateway"
-        else
-          echo "ℹ️ Application Gateway doesn't exist, will be created"
-        fi
+        # Check which specific resources exist in Azure
+        echo "🔍 Checking for specific resources that are causing conflicts..."
         
-        # Import NSG associations (these are more complex, try to import directly)
-        echo "🔗 Attempting to import NSG associations..."
-        terraform import azurerm_subnet_network_security_group_association.aks "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.Network/virtualNetworks/vnet-devops-${{ env.AZURE_LOCATION }}/subnets/subnet-aks-devops-${{ env.AZURE_LOCATION }}" 2>/dev/null || echo "⚠️ AKS NSG association doesn't exist or already imported"
-        terraform import azurerm_subnet_network_security_group_association.appgw "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.Network/virtualNetworks/vnet-devops-${{ env.AZURE_LOCATION }}/subnets/subnet-appgw-devops-${{ env.AZURE_LOCATION }}" 2>/dev/null || echo "⚠️ App Gateway NSG association doesn't exist or already imported"
+        # Check for each resource that might cause the "already exists" error
+        echo "Checking managed identity..."
+        az identity show --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" --name "id-devops-eastus" &>/dev/null && echo "✅ id-devops-eastus exists" || echo "❌ id-devops-eastus missing"
         
-        # Import other resources
-        terraform import 'azurerm_log_analytics_workspace.main[0]' "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.OperationalInsights/workspaces/law-devops-${{ env.AZURE_LOCATION }}" 2>/dev/null || echo "⚠️ Log Analytics workspace doesn't exist or already imported"
-        terraform import azurerm_network_security_group.aks "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.Network/networkSecurityGroups/nsg-aks-devops-${{ env.AZURE_LOCATION }}" 2>/dev/null || echo "⚠️ AKS NSG doesn't exist or already imported"
-        terraform import azurerm_network_security_group.appgw "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.Network/networkSecurityGroups/nsg-appgw-devops-${{ env.AZURE_LOCATION }}" 2>/dev/null || echo "⚠️ App Gateway NSG doesn't exist or already imported"
-        terraform import azurerm_virtual_network.main "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.Network/virtualNetworks/vnet-devops-${{ env.AZURE_LOCATION }}" 2>/dev/null || echo "⚠️ VNet doesn't exist or already imported"
-        terraform import azurerm_subnet.aks "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.Network/virtualNetworks/vnet-devops-${{ env.AZURE_LOCATION }}/subnets/subnet-aks-devops-${{ env.AZURE_LOCATION }}" 2>/dev/null || echo "⚠️ AKS subnet doesn't exist or already imported"
-        terraform import azurerm_subnet.appgw "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.Network/virtualNetworks/vnet-devops-${{ env.AZURE_LOCATION }}/subnets/subnet-appgw-devops-${{ env.AZURE_LOCATION }}" 2>/dev/null || echo "⚠️ App Gateway subnet doesn't exist or already imported"
-        terraform import azurerm_public_ip.appgw "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.Network/publicIPAddresses/pip-appgw-devops-${{ env.AZURE_LOCATION }}" 2>/dev/null || echo "⚠️ Public IP doesn't exist or already imported"
+        echo "Checking Log Analytics workspace..."
+        az monitor log-analytics workspace show --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" --workspace-name "law-devops-eastus" &>/dev/null && echo "✅ law-devops-eastus exists" || echo "❌ law-devops-eastus missing"
         
-        # Import container registry (with calculated name)
-        ACR_NAME="acrzabbixdevops${{ env.AZURE_LOCATION }}"
-        terraform import azurerm_container_registry.main "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.ContainerRegistry/registries/$ACR_NAME" 2>/dev/null || echo "⚠️ Container registry doesn't exist or already imported"
+        echo "Checking Container Registry..."
+        az acr show --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" --name "acrdevopseastus" &>/dev/null && echo "✅ acrdevopseastus exists" || echo "❌ acrdevopseastus missing"
+        
+        echo "Checking Network Security Groups..."
+        az network nsg show --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" --name "nsg-aks-devops-eastus" &>/dev/null && echo "✅ nsg-aks-devops-eastus exists" || echo "❌ nsg-aks-devops-eastus missing"
+        az network nsg show --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" --name "nsg-appgw-devops-eastus" &>/dev/null && echo "✅ nsg-appgw-devops-eastus exists" || echo "❌ nsg-appgw-devops-eastus missing"
+        
+        echo "Checking Virtual Network and Subnets..."
+        az network vnet show --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" --name "vnet-devops-eastus" &>/dev/null && echo "✅ vnet-devops-eastus exists" || echo "❌ vnet-devops-eastus missing"
+        
+        echo "Checking Public IP..."
+        az network public-ip show --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" --name "pip-appgw-devops-eastus" &>/dev/null && echo "✅ pip-appgw-devops-eastus exists" || echo "❌ pip-appgw-devops-eastus missing"
+        
+        echo "Checking Application Gateway..."
+        az network application-gateway show --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" --name "appgw-devops-eastus" &>/dev/null && echo "✅ appgw-devops-eastus exists" || echo "❌ appgw-devops-eastus missing"
+        
+        echo "Checking AKS cluster..."
+        az aks show --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" --name "aks-devops-eastus" &>/dev/null && echo "✅ aks-devops-eastus exists" || echo "❌ aks-devops-eastus missing"
+        
+        # Import resources based on the error messages we're seeing
+        echo "📦 Importing resources that caused the errors..."
+        
+        # Import managed identity (from error: id-devops-eastus)
+        echo "Importing managed identity..."
+        # Remove from state first if it exists but points to wrong resource
+        terraform state rm azurerm_user_assigned_identity.aks 2>/dev/null || echo "No existing state for managed identity"
+        terraform import azurerm_user_assigned_identity.aks "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-devops-eastus" 2>/dev/null && echo "✅ Managed identity imported" || echo "⚠️ Managed identity import failed"
+        
+        # Import Log Analytics workspace (from error: law-devops-eastus)
+        echo "Importing Log Analytics workspace..."
+        terraform state rm 'azurerm_log_analytics_workspace.main[0]' 2>/dev/null || echo "No existing state for Log Analytics"
+        terraform import 'azurerm_log_analytics_workspace.main[0]' "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.OperationalInsights/workspaces/law-devops-eastus" 2>/dev/null && echo "✅ Log Analytics workspace imported" || echo "⚠️ Log Analytics workspace import failed"
+        
+        # Import Container Registry (from error: acrdevopseastus)
+        echo "Importing Container Registry..."
+        terraform state rm azurerm_container_registry.main 2>/dev/null || echo "No existing state for Container Registry"
+        terraform import azurerm_container_registry.main "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.ContainerRegistry/registries/acrdevopseastus" 2>/dev/null && echo "✅ Container Registry imported" || echo "⚠️ Container Registry import failed"
+        
+        # Import Network Security Groups (from errors: nsg-aks-devops-eastus, nsg-appgw-devops-eastus)
+        echo "Importing Network Security Groups..."
+        terraform state rm azurerm_network_security_group.aks 2>/dev/null || echo "No existing state for AKS NSG"
+        terraform import azurerm_network_security_group.aks "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.Network/networkSecurityGroups/nsg-aks-devops-eastus" 2>/dev/null && echo "✅ AKS NSG imported" || echo "⚠️ AKS NSG import failed"
+        terraform state rm azurerm_network_security_group.appgw 2>/dev/null || echo "No existing state for App Gateway NSG"
+        terraform import azurerm_network_security_group.appgw "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.Network/networkSecurityGroups/nsg-appgw-devops-eastus" 2>/dev/null && echo "✅ App Gateway NSG imported" || echo "⚠️ App Gateway NSG import failed"
+        
+        # Import Virtual Network (from error: vnet-devops-eastus)
+        echo "Importing Virtual Network..."
+        terraform state rm azurerm_virtual_network.main 2>/dev/null || echo "No existing state for VNet"
+        terraform import azurerm_virtual_network.main "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.Network/virtualNetworks/vnet-devops-eastus" 2>/dev/null && echo "✅ VNet imported" || echo "⚠️ VNet import failed"
+        
+        # Import Public IP (from error: pip-appgw-devops-eastus)
+        echo "Importing Public IP..."
+        terraform state rm azurerm_public_ip.appgw 2>/dev/null || echo "No existing state for Public IP"
+        terraform import azurerm_public_ip.appgw "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.Network/publicIPAddresses/pip-appgw-devops-eastus" 2>/dev/null && echo "✅ Public IP imported" || echo "⚠️ Public IP import failed"
+        
+        # Import subnets
+        echo "Importing Subnets..."
+        terraform state rm azurerm_subnet.aks 2>/dev/null || echo "No existing state for AKS subnet"
+        terraform import azurerm_subnet.aks "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.Network/virtualNetworks/vnet-devops-eastus/subnets/subnet-aks-devops-eastus" 2>/dev/null && echo "✅ AKS subnet imported" || echo "⚠️ AKS subnet import failed"
+        terraform state rm azurerm_subnet.appgw 2>/dev/null || echo "No existing state for App Gateway subnet"
+        terraform import azurerm_subnet.appgw "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.Network/virtualNetworks/vnet-devops-eastus/subnets/subnet-appgw-devops-eastus" 2>/dev/null && echo "✅ App Gateway subnet imported" || echo "⚠️ App Gateway subnet import failed"
+        
+        # Import NSG associations
+        echo "Importing NSG associations..."
+        terraform state rm azurerm_subnet_network_security_group_association.aks 2>/dev/null || echo "No existing state for AKS NSG association"
+        terraform import azurerm_subnet_network_security_group_association.aks "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.Network/virtualNetworks/vnet-devops-eastus/subnets/subnet-aks-devops-eastus" 2>/dev/null && echo "✅ AKS NSG association imported" || echo "⚠️ AKS NSG association import failed"
+        terraform state rm azurerm_subnet_network_security_group_association.appgw 2>/dev/null || echo "No existing state for App Gateway NSG association"
+        terraform import azurerm_subnet_network_security_group_association.appgw "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.Network/virtualNetworks/vnet-devops-eastus/subnets/subnet-appgw-devops-eastus" 2>/dev/null && echo "✅ App Gateway NSG association imported" || echo "⚠️ App Gateway NSG association import failed"
+        
+        # Try to import Application Gateway if it exists
+        echo "Importing Application Gateway..."
+        terraform state rm azurerm_application_gateway.main 2>/dev/null || echo "No existing state for Application Gateway"
+        terraform import azurerm_application_gateway.main "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.Network/applicationGateways/appgw-devops-eastus" 2>/dev/null && echo "✅ Application Gateway imported" || echo "⚠️ Application Gateway import failed"
+        
+        # Try to import AKS cluster if it exists
+        echo "Importing AKS cluster..."
+        terraform state rm azurerm_kubernetes_cluster.main 2>/dev/null || echo "No existing state for AKS cluster"
+        terraform import azurerm_kubernetes_cluster.main "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.ContainerService/managedClusters/aks-devops-eastus" 2>/dev/null && echo "✅ AKS cluster imported" || echo "⚠️ AKS cluster import failed"
         
         set -e  # Re-enable exit on error
         echo "✅ Import attempts completed"
+        
+        # Show final state after all imports
+        echo "📋 Final Terraform state after imports:"
+        terraform state list | sort
+        
+        echo "📊 Import Summary:"
+        echo "Resources in Terraform state: $(terraform state list | wc -l)"
+        echo "Resources in Azure RG: $(az resource list --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" --query 'length(@)' --output tsv 2>/dev/null || echo 'unknown')"
         
         # Validate configuration
         echo "🔍 Validating Terraform configuration..."
@@ -311,19 +381,22 @@ jobs:
         echo "PLAN_FILE=$PLAN_FILE" >> $GITHUB_ENV
         
         # Create plan
-        echo "📋 Creating Terraform plan..."
-        if ! terraform plan -out=$PLAN_FILE -detailed-exitcode; then
-          PLAN_EXIT_CODE=$?
-          if [ $PLAN_EXIT_CODE -eq 1 ]; then
-            echo "❌ Terraform plan failed due to errors"
-            exit 1
-          elif [ $PLAN_EXIT_CODE -eq 2 ]; then
-            echo "📋 Terraform plan created with changes to apply"
-            echo "PLAN_HAS_CHANGES=true" >> $GITHUB_ENV
-          else
-            echo "📋 Terraform plan created with no changes"
-            echo "PLAN_HAS_CHANGES=false" >> $GITHUB_ENV
-          fi
+        echo "📋 Creating Terraform plan after import..."
+        set +e  # Don't exit on plan errors
+        terraform plan -out=$PLAN_FILE -detailed-exitcode
+        PLAN_EXIT_CODE=$?
+        set -e  # Re-enable exit on error
+        
+        if [ $PLAN_EXIT_CODE -eq 1 ]; then
+          echo "❌ Terraform plan failed due to errors"
+          echo "🔍 Running plan again in verbose mode for debugging..."
+          terraform plan -no-color 2>&1 | head -50
+          exit 1
+        elif [ $PLAN_EXIT_CODE -eq 2 ]; then
+          echo "📋 Terraform plan created with changes to apply"
+          echo "PLAN_HAS_CHANGES=true" >> $GITHUB_ENV
+          echo "� Plan summary (first 30 lines):"
+          terraform show -no-color $PLAN_FILE 2>/dev/null | head -30 || echo "Could not show plan details"
         else
           echo "📋 Terraform plan created with no changes"
           echo "PLAN_HAS_CHANGES=false" >> $GITHUB_ENV
