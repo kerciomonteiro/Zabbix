@@ -622,6 +622,17 @@ The workflow now uses the modern Azure CLI AKS addon method for installing Appli
 - LoadBalancer services need proper HTTP health check annotations
 - NSG rules are required for NodePort access
 
+### AKS Node Resource Group Naming ✅
+
+**Status**: **RESOLVED** - Consistent naming pattern implemented
+
+Fixed the AKS node resource group naming to follow the consistent DevOps naming convention. See:
+
+- **[AKS_NODE_RESOURCE_GROUP_FIX.md](AKS_NODE_RESOURCE_GROUP_FIX.md)** - Complete naming fix documentation
+
+**Before**: `rg-zabbix-devops-eastus-aks-nodes-devops-eastus` (malformed, duplicated suffix)
+**After**: `rg-aks-nodes-devops-eastus` (consistent pattern)
+
 ### Common Issues
 
 #### 1. 502 Bad Gateway

@@ -56,7 +56,7 @@ locals {
   resource_names = {
     vnet               = "vnet-${local.devops_naming_suffix}"
     aks_cluster        = "aks-${local.devops_naming_suffix}"
-    aks_node_rg        = "rg-zabbix-devops-eastus-aks-nodes-devops-eastus"
+    aks_node_rg        = "rg-aks-nodes-${local.devops_naming_suffix}"
     aks_subnet         = "subnet-aks-${local.devops_naming_suffix}"
     appgw_subnet       = "subnet-appgw-${local.devops_naming_suffix}"
     identity           = "id-${local.devops_naming_suffix}"
