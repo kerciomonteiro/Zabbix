@@ -43,6 +43,8 @@ The scripts automatically detect and import these critical resources:
 7. **Application Insights** (`ai-devops-eastus`)
 8. **AKS Subnet** (`subnet-aks-devops-eastus`)
 9. **App Gateway Subnet** (`subnet-appgw-devops-eastus`)
+10. **Application Gateway** (`appgw-devops-eastus`)
+11. **Subnet NSG Associations** (AKS and App Gateway subnets)
 
 ## Manual Resolution (If Automatic Fails)
 
@@ -74,6 +76,15 @@ terraform import "azurerm_subnet.aks" \
 
 terraform import "azurerm_subnet.appgw" \
   "/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Network/virtualNetworks/vnet-devops-eastus/subnets/subnet-appgw-devops-eastus"
+
+terraform import "azurerm_application_gateway.main" \
+  "/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Network/applicationGateways/appgw-devops-eastus"
+
+terraform import "azurerm_subnet_network_security_group_association.aks" \
+  "/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Network/virtualNetworks/vnet-devops-eastus/subnets/subnet-aks-devops-eastus"
+
+terraform import "azurerm_subnet_network_security_group_association.appgw" \
+  "/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Network/virtualNetworks/vnet-devops-eastus/subnets/subnet-appgw-devops-eastus"
 ```
 
 ### Option 3: Clean State (Nuclear Option)
@@ -86,6 +97,9 @@ terraform state rm "azurerm_log_analytics_solution.container_insights[0]"
 terraform state rm "azurerm_application_insights.main[0]"  
 terraform state rm "azurerm_subnet.aks"
 terraform state rm "azurerm_subnet.appgw"
+terraform state rm "azurerm_application_gateway.main"
+terraform state rm "azurerm_subnet_network_security_group_association.aks"
+terraform state rm "azurerm_subnet_network_security_group_association.appgw"
 
 # Run terraform apply to recreate
 terraform apply
@@ -125,7 +139,7 @@ After resolution, verify the deployment:
 
 ```bash
 # Check Terraform state
-terraform state list | grep -E "(container_insights|application_insights|subnet)"
+terraform state list | grep -E "(container_insights|application_insights|subnet|application_gateway)"
 
 # Verify resources in Azure
 az resource list -g rg-devops-pops-eastus --query "[?contains(id, 'ContainerInsights')]"

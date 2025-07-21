@@ -624,11 +624,12 @@ The workflow now uses the modern Azure CLI AKS addon method for installing Appli
 
 ### Terraform Import Issues ✅
 
-**Status**: **RESOLVED** - Automatic import resolution implemented
+**Status**: **RESOLVED** - Enhanced focused import resolution implemented
 
-Enhanced import handling prevents conflicts when Azure resources already exist but aren't in Terraform state. The deployment workflow includes automatic detection and import of critical resources. See:
+The workflow now includes a focused import fix script that specifically targets the resources that commonly cause import errors during GitHub Actions deployment, including Application Gateway and subnet NSG associations. See:
 
-- **[TERRAFORM_IMPORT_RESOLUTION.md](TERRAFORM_IMPORT_RESOLUTION.md)** - Complete import error resolution guide
+- **[TERRAFORM_IMPORT_FIX_UPDATED.md](TERRAFORM_IMPORT_FIX_UPDATED.md)** - Latest enhanced import fix documentation
+- **[TERRAFORM_IMPORT_RESOLUTION.md](TERRAFORM_IMPORT_RESOLUTION.md)** - Previous comprehensive import resolution guide
 
 ### AKS Node Resource Group Naming ✅
 

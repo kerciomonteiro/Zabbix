@@ -30,7 +30,7 @@ try {
     terraform init -input=false
     
     $successCount = 0
-    $totalCount = 4
+    $totalCount = 7
     
     # Function to safely import resources
     function Import-TerraformResource {
@@ -101,6 +101,27 @@ try {
         $successCount++
     }
     
+    # 5. Application Gateway
+    if (Import-TerraformResource -TerraformResource "azurerm_application_gateway.main" `
+        -AzureResourceId "/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroup/providers/Microsoft.Network/applicationGateways/appgw-devops-eastus" `
+        -DisplayName "Application Gateway") {
+        $successCount++
+    }
+    
+    # 6. AKS Subnet NSG Association
+    if (Import-TerraformResource -TerraformResource "azurerm_subnet_network_security_group_association.aks" `
+        -AzureResourceId "/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroup/providers/Microsoft.Network/virtualNetworks/vnet-devops-eastus/subnets/subnet-aks-devops-eastus" `
+        -DisplayName "AKS Subnet NSG Association") {
+        $successCount++
+    }
+    
+    # 7. App Gateway Subnet NSG Association
+    if (Import-TerraformResource -TerraformResource "azurerm_subnet_network_security_group_association.appgw" `
+        -AzureResourceId "/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroup/providers/Microsoft.Network/virtualNetworks/vnet-devops-eastus/subnets/subnet-appgw-devops-eastus" `
+        -DisplayName "App Gateway Subnet NSG Association") {
+        $successCount++
+    }
+    
     Write-Host ""
     Write-Host "=== IMPORT SUMMARY ===" -ForegroundColor Magenta
     Write-Host "Import Results: $successCount/$totalCount resources successfully imported" -ForegroundColor $(if ($successCount -eq $totalCount) { "Green" } else { "Yellow" })
@@ -124,7 +145,10 @@ try {
         "azurerm_log_analytics_solution.container_insights[0]",
         "azurerm_application_insights.main[0]",
         "azurerm_subnet.aks",
-        "azurerm_subnet.appgw"
+        "azurerm_subnet.appgw",
+        "azurerm_application_gateway.main",
+        "azurerm_subnet_network_security_group_association.aks",
+        "azurerm_subnet_network_security_group_association.appgw"
     )
     
     foreach ($resource in $stateResources) {

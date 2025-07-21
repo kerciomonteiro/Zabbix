@@ -35,7 +35,7 @@ echo ""
 echo "=== STEP 2: Disable Kubernetes Provider ==="
 ../../scripts/terraform/terraform-provider-helper.sh disable
 
-# Step 3: Import existing resources (Critical Step)
+# Step 3: Import existing resources (Enhanced with focused approach)
 echo ""
 echo "=== STEP 3: Import Azure Resources ==="
 
@@ -43,56 +43,20 @@ if [ "$SKIP_IMPORT" = "true" ]; then
     echo "⚠️ Skipping import due to missing environment variables"
     echo "IMPORT_SUCCESS=skipped" >> "$GITHUB_OUTPUT"
 else
-    # First attempt - try standard import
+    # Use the focused import fix script that targets specific resources
+    echo "🎯 Running focused import for commonly failing resources..."
     set +e  # Don't exit on import errors initially
-    ../../scripts/terraform/terraform-import-helper.sh
+    ../../scripts/terraform/terraform-import-fix.sh
     IMPORT_EXIT_CODE=$?
     set -e
-
-    # Enhanced import handling - retry critical resources if import failed
-    if [ $IMPORT_EXIT_CODE -ne 0 ]; then
-        echo "⚠️ Initial import process failed - attempting targeted recovery..."
-        
-        # List of critical resources that must be imported to avoid conflicts
-        declare -a critical_resources=(
-            "azurerm_log_analytics_workspace.main[0]|/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.OperationalInsights/workspaces/law-devops-eastus|Log Analytics Workspace"
-            "azurerm_container_registry.main|/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.ContainerRegistry/registries/acrdevopseastus|Container Registry"  
-            "azurerm_network_security_group.aks|/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Network/networkSecurityGroups/nsg-aks-devops-eastus|AKS NSG"
-            "azurerm_network_security_group.appgw|/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Network/networkSecurityGroups/nsg-appgw-devops-eastus|App Gateway NSG"
-            "azurerm_virtual_network.main|/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Network/virtualNetworks/vnet-devops-eastus|Virtual Network"
-            "azurerm_public_ip.appgw|/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Network/publicIPAddresses/pip-appgw-devops-eastus|Public IP"
-            "azurerm_log_analytics_solution.container_insights[0]|/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.OperationsManagement/solutions/ContainerInsights(law-devops-eastus)|Container Insights Solution"
-            "azurerm_application_insights.main[0]|/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Insights/components/ai-devops-eastus|Application Insights"
-            "azurerm_subnet.aks|/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Network/virtualNetworks/vnet-devops-eastus/subnets/subnet-aks-devops-eastus|AKS Subnet"
-            "azurerm_subnet.appgw|/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Network/virtualNetworks/vnet-devops-eastus/subnets/subnet-appgw-devops-eastus|App Gateway Subnet"
-        )
-        
-        echo "🔄 Attempting targeted import of critical resources..."
-        for resource_info in "${critical_resources[@]}"; do
-            IFS='|' read -r tf_resource azure_id display_name <<< "$resource_info"
-            
-            # Check if resource exists and needs import
-            if ! terraform state show "$tf_resource" >/dev/null 2>&1; then
-                if az resource show --ids "$azure_id" >/dev/null 2>&1; then
-                    echo "⚡ Importing critical resource: $display_name"
-                    set +e
-                    terraform import "$tf_resource" "$azure_id" 2>/dev/null
-                    if [ $? -eq 0 ]; then
-                        echo "  ✅ Successfully imported $display_name"
-                    else
-                        echo "  ❌ Failed to import $display_name - will attempt plan anyway"
-                    fi
-                    set -e
-                fi
-            else
-                echo "  ✅ $display_name already in state"
-            fi
-        done
-        
-        echo "IMPORT_SUCCESS=partial" >> "$GITHUB_OUTPUT"
-    else
-        echo "✅ Import process completed successfully"
+    
+    if [ $IMPORT_EXIT_CODE -eq 0 ]; then
+        echo "✅ Focused import completed successfully"
         echo "IMPORT_SUCCESS=true" >> "$GITHUB_OUTPUT"
+    else
+        echo "⚠️ Focused import had some issues (exit code: $IMPORT_EXIT_CODE)"
+        echo "This is often normal - resources may not exist yet or may already be in state"
+        echo "IMPORT_SUCCESS=partial" >> "$GITHUB_OUTPUT"
     fi
 fi
 
