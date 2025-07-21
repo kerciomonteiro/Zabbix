@@ -81,7 +81,7 @@ echo ""
 echo "📦 Starting systematic resource import in dependency order..."
 
 imported_count=0
-total_resources=13
+total_resources=15
 
 # Track successful imports
 declare -a successful_imports=()
@@ -107,6 +107,26 @@ if safe_import "azurerm_log_analytics_workspace.main[0]" \
     ((imported_count++))
 else
     failed_imports+=("Log Analytics Workspace")
+fi
+
+# Log Analytics Solution (Container Insights)
+if safe_import "azurerm_log_analytics_solution.container_insights[0]" \
+    "/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.OperationsManagement/solutions/ContainerInsights(law-devops-eastus)" \
+    "Container Insights Solution"; then
+    successful_imports+=("Container Insights Solution")
+    ((imported_count++))
+else
+    failed_imports+=("Container Insights Solution")
+fi
+
+# Application Insights
+if safe_import "azurerm_application_insights.main[0]" \
+    "/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Insights/components/ai-devops-eastus" \
+    "Application Insights"; then
+    successful_imports+=("Application Insights")
+    ((imported_count++))
+else
+    failed_imports+=("Application Insights")
 fi
 
 if safe_import "azurerm_container_registry.main" \
