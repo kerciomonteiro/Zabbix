@@ -13,6 +13,10 @@ if [[ -z "$AZURE_SUBSCRIPTION_ID" || -z "$AZURE_RESOURCE_GROUP" ]]; then
     echo "❌ Error: Required environment variables missing"
     echo "   AZURE_SUBSCRIPTION_ID: ${AZURE_SUBSCRIPTION_ID:-'Not set'}"
     echo "   AZURE_RESOURCE_GROUP: ${AZURE_RESOURCE_GROUP:-'Not set'}"
+    echo ""
+    echo "ℹ️  Expected values:"
+    echo "   AZURE_SUBSCRIPTION_ID: d9b2a1cf-f99b-4f9e-a6cf-c79a078406bf"
+    echo "   AZURE_RESOURCE_GROUP: rg-devops-pops-eastus"
     exit 1
 fi
 

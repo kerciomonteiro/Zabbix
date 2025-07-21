@@ -22,46 +22,36 @@ This repository contains the Infrastructure as Code (IaC) and Kubernetes manifes
 
 > **📋 Current Issue**: AKS cluster creation fails due to managed identity credential reconciliation error  
 > **📋 Root Cause**: Timing issue between identity creation/role assignments and AKS cluster usage  
-> **📋 Solution### AKS Cluster Import Issues ⚠️
+> **📋 Solution### AKS Cluster Import Issues ⚡
 
-**Status**: **ACTIVE** - Enhanced import fix and troubleshooting tools deployed
+**Status**: **ACTIVELY RESOLVING** - Enhanced import diagnostics and automated resolution applied
 
-The deployment may encounter AKS cluster import errors when the cluster already exists in Azure but is not in the Terraform state. This typically happens when:
-
-**Common Scenarios:**
-- Previous deployment was partially successful
-- Manual cluster creation outside of Terraform
-- State file corruption or loss
-- Configuration changes that require cluster recreation
-
-**Error Example:**
+**Latest Issue**: AKS cluster import conflict during Terraform deployment:
 ```
-Error: A resource with the ID "/.../managedClusters/aks-devops-eastus" already exists - to be managed via Terraform this resource needs to be imported into the State.
+Error: A resource with the ID "...managedClusters/aks-devops-eastus" already exists - to be managed via Terraform this resource needs to be imported into the State.
 ```
 
-**Solutions Applied:**
-- **Enhanced Import Script**: Comprehensive resource import with dependency awareness
-- **Diagnostic Logging**: Detailed analysis of import failures and suggested actions
-- **Automated Recovery**: Built into GitHub Actions workflow via `terraform-import-fix.sh`
+**Root Cause**: The AKS cluster `aks-devops-eastus` exists in Azure but is not in the current Terraform state, causing conflicts when Terraform attempts to create it.
 
-**Manual Troubleshooting:**
-For complex import issues, use the dedicated troubleshooting script:
-```bash
-cd infra/terraform
-export AZURE_SUBSCRIPTION_ID="d9b2a1cf-f99b-4f9e-a6cf-c79a078406bf"
-export AZURE_RESOURCE_GROUP="rg-devops-pops-eastus"
-../../scripts/terraform/aks-import-troubleshoot.sh
-```
+**Solutions Applied**:
+- **Enhanced Import Script**: Updated `terraform-import-fix.sh` with detailed AKS cluster diagnostics
+- **Dedicated Troubleshooting Tool**: New `aks-import-troubleshoot.sh` script for step-by-step analysis
+- **Configuration Compatibility Checks**: Detects if existing cluster matches Terraform configuration
+- **Multiple Resolution Paths**: Automated import, manual troubleshooting, or cluster recreation options
 
-**Recovery Options:**
-1. **Automatic Import** - GitHub Actions workflow handles most cases
-2. **Manual Import** - Use troubleshooting script for detailed analysis
-3. **Cluster Recreation** - Delete existing cluster to start fresh (downtime required)
-4. **State Recovery** - Restore from backup or reinitialize Terraform state
+**Resource Group Clarification**:
+- **Main Resource Group**: `rg-devops-pops-eastus` (contains all infrastructure, used by Terraform)
+- **AKS Node Resource Group**: `rg-aks-nodes-devops-eastus` (automatically created by Azure for AKS infrastructure - this is expected)
 
-See detailed import fix documentation:
-- **[scripts/terraform/terraform-import-fix.sh](scripts/terraform/terraform-import-fix.sh)** - Main import automation
-- **[scripts/terraform/aks-import-troubleshoot.sh](scripts/terraform/aks-import-troubleshoot.sh)** - Detailed troubleshooting
+See comprehensive analysis and recovery options:
+- **[AKS_CLUSTER_IMPORT_FIX.md](AKS_CLUSTER_IMPORT_FIX.md)** - Detailed analysis, resolution options, and troubleshooting
+- **[scripts/terraform/aks-import-troubleshoot.sh](scripts/terraform/aks-import-troubleshoot.sh)** - Dedicated AKS import troubleshooting script
+
+**Resolution Options**:
+1. **Automated**: Enhanced import script runs automatically in GitHub Actions
+2. **Manual Troubleshooting**: Use dedicated AKS troubleshooting script for detailed analysis
+3. **Configuration Update**: Adjust Terraform to match existing cluster if needed
+4. **Cluster Recreation**: Delete and recreate if configuration drift is too significant (causes downtime)
 
 ### Managed Identity Issues �
 

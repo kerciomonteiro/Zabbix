@@ -54,6 +54,12 @@
 - **Dependency Management**: Explicit role assignment dependencies
 - **Recovery Tools**: Manual troubleshooting and verification scripts
 
+### Phase 7: AKS Cluster Import Issue (Current 🔧)
+- **AKS Resource Conflict**: Existing cluster not in Terraform state causing import conflicts
+- **Enhanced Import Diagnostics**: Detailed AKS cluster import troubleshooting
+- **Resource Group Clarification**: `rg-aks-nodes-devops-eastus` is expected AKS node resource group
+- **Import Script Enhancement**: Better error handling and diagnostic information
+
 ---
 
 ## 🛠️ Technical Architecture Implemented
@@ -123,6 +129,7 @@ AKS Cluster Creation Dependencies:
 - **[scripts/terraform/terraform-import-fix.sh](scripts/terraform/terraform-import-fix.sh)** - Comprehensive import resolution
 - **[scripts/terraform/quick-import-fix.sh](scripts/terraform/quick-import-fix.sh)** - Quick manual fixes
 - **[scripts/terraform/managed-identity-recovery.sh](scripts/terraform/managed-identity-recovery.sh)** - Identity troubleshooting
+- **[scripts/terraform/aks-import-troubleshoot.sh](scripts/terraform/aks-import-troubleshoot.sh)** - AKS cluster import diagnostics
 - **[fix-missing-terraform-imports.ps1](fix-missing-terraform-imports.ps1)** - PowerShell recovery
 
 ### Status Tracking
