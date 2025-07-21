@@ -242,545 +242,32 @@ jobs:
         # Store environment name for later steps
         echo "TERRAFORM_ENV_NAME=$ENV_NAME" >> $GITHUB_ENV
 
-    - name: Deploy Infrastructure with Terraform
-      id: deploy-infra-terraform
+    - name: Initialize Terraform
       if: ${{ env.INFRASTRUCTURE_METHOD == 'terraform' || env.INFRASTRUCTURE_METHOD == 'both' }}
-      continue-on-error: true
       run: |
+        cd infra/terraform
+        
         echo "🚀 Starting Terraform deployment process..."
         echo "Mode: ${{ env.TERRAFORM_MODE }}"
-        
-        cd infra/terraform
         
         # Initialize Terraform
         echo "📦 Initializing Terraform..."
         terraform init
+
+    - name: Deploy Infrastructure with Terraform
+      id: terraform-deploy
+      if: ${{ env.INFRASTRUCTURE_METHOD == 'terraform' || env.INFRASTRUCTURE_METHOD == 'both' }}
+      run: |
+        cd infra/terraform
         
-        # Temporarily disable Kubernetes provider during import to prevent configuration errors
-        echo "🔧 Temporarily disabling Kubernetes provider during import phase..."
-        if [ -f "kubernetes-providers.tf" ]; then
-          mv kubernetes-providers.tf kubernetes-providers.tf.disabled
-          echo "   ✅ Kubernetes provider temporarily disabled"
-        else
-          echo "   ⚠️  kubernetes-providers.tf not found - continuing anyway"
-        fi
-        
-        # Import existing resources if they exist (ignore errors for non-existent resources)
-        echo "📦 Attempting to import existing resources..."
-        set +e  # Don't exit on import errors
-        
-        # List all resources in the resource group first
-        echo "🔍 Listing all resources in resource group ${{ env.AZURE_RESOURCE_GROUP }}..."
-        az resource list --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" --output table || echo "⚠️ Failed to list resources"
-        
-        # Check current Terraform state
-        echo "🔍 Current Terraform state:"
-        terraform state list || echo "No resources in state yet"
-        
-        # Check which specific resources exist in Azure
-        echo "🔍 Checking for specific resources that are causing conflicts..."
-        
-        # Function to check resource existence and get actual names
-        # Simple resource listing
-        echo "🔍 Listing resources in resource group ${{ env.AZURE_RESOURCE_GROUP }}..."
-        az resource list --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" --output table || echo "⚠️ Failed to list resources"
-        
-        # Skip complex resource discovery - we know the exact resource names
-        echo ">> Using known resource names for import..."
-        
-        # Import resources - simplified approach with better error handling
-        echo ">> Importing resources using a simplified, robust approach..."
-        
-        # Function to safely import a resource with improved error handling and full diagnostics
-        safe_import() {
-            local tf_resource="$1"
-            local azure_id="$2"
-            local display_name="$3"
-            
-            echo ""
-            echo "==> Processing $display_name..."
-            echo "    Terraform resource: $tf_resource"
-            echo "    Azure resource ID: $azure_id"
-            
-            # Check if resource is already in Terraform state
-            if terraform state show "$tf_resource" >/dev/null 2>&1; then
-                echo "    [INFO] Resource already in Terraform state - verifying..."
-                # Get the actual ID from Terraform state (different approach)
-                local current_id=""
-                current_id=$(terraform state show "$tf_resource" 2>/dev/null | grep -E '^\s*id\s*=' | head -1 | sed -E 's/.*=\s*"([^"]+)".*/\1/' || echo "")
-                
-                if [ -n "$current_id" ] && [ "$current_id" = "$azure_id" ]; then
-                    echo "    [SUCCESS] $display_name already correctly imported"
-                    return 0
-                else
-                    echo "    [WARNING] State exists but may point to different resource or be corrupted"
-                    echo "              Current ID in state: $current_id"
-                    echo "              Expected ID: $azure_id"
-                    echo "              Removing and re-importing..."
-                    terraform state rm "$tf_resource" >/dev/null 2>&1 || echo "              Note: Failed to remove from state (might not exist)"
-                fi
-            fi
-            
-            # Verify the Azure resource exists
-            echo "    [CHECK] Verifying resource exists in Azure..."
-            if ! az resource show --ids "$azure_id" >/dev/null 2>&1; then
-                echo "    [ERROR] Resource not found in Azure - skipping import"
-                return 1
-            fi
-            echo "    [SUCCESS] Resource verified in Azure"
-            
-            # Attempt the import with detailed output capture
-            echo "    [IMPORT] Importing $display_name into Terraform state..."
-            local import_output=""
-            local import_exit_code=0
-            
-            # Capture full output and exit code
-            import_output=$(terraform import "$tf_resource" "$azure_id" 2>&1) || import_exit_code=$?
-            
-            # Analyze the output to determine success/failure
-            local import_success=false
-            if [ $import_exit_code -eq 0 ]; then
-                # Check for success indicators in output
-                if echo "$import_output" | grep -q "Import successful\|successfully imported\|Import prepared"; then
-                    import_success=true
-                fi
-                # Also check if there are no error indicators
-                if ! echo "$import_output" | grep -qi "error\|failed\|invalid"; then
-                    import_success=true
-                fi
-            fi
-            
-            if [ "$import_success" = true ]; then
-                echo "    [SUCCESS] Successfully imported $display_name"
-                # Show success details if in debug mode
-                if [ "${{ github.event.inputs.debug_mode }}" = "true" ]; then
-                    echo "              Import output:"
-                    echo "$import_output" | sed 's/^/              /' | tail -5
-                fi
-                return 0
-            else
-                echo "    [FAILED] Import failed for $display_name (exit code: $import_exit_code)"
-                echo "             Full error output:"
-                # Show complete error output, not just first 10 lines
-                echo "$import_output" | sed 's/^/              /'
-                echo ""
-                echo "             Common causes and solutions:"
-                echo "             - Resource definition in Terraform doesn't match actual Azure resource"
-                echo "               Solution: Check Terraform resource configuration"
-                echo "             - Missing dependencies in Terraform state" 
-                echo "               Solution: Import dependencies first or run terraform refresh"
-                echo "             - Resource provider registration issues"
-                echo "               Solution: Register required providers in Azure"
-                echo "             - Permissions issues"
-                echo "               Solution: Verify service principal has required permissions"
-                echo ""
-                return 1
-            fi
-        }
-        
-        
-        # Import critical resources in dependency order
-        echo ""
-        echo ">> Starting systematic resource import in dependency order..."
-        
-        # 1. Import Managed Identity (fundamental dependency for AKS)
-        safe_import "azurerm_user_assigned_identity.aks" \
-            "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-devops-eastus" \
-            "Managed Identity"
-        
-        # 2. Import Log Analytics workspace (independent resource)
-        safe_import "azurerm_log_analytics_workspace.main[0]" \
-            "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.OperationalInsights/workspaces/law-devops-eastus" \
-            "Log Analytics Workspace"
-        
-        # 3. Import Container Registry (independent resource)
-        safe_import "azurerm_container_registry.main" \
-            "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.ContainerRegistry/registries/acrdevopseastus" \
-            "Container Registry"
-        
-        # 4. Import Virtual Network (required for subnets)
-        safe_import "azurerm_virtual_network.main" \
-            "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.Network/virtualNetworks/vnet-devops-eastus" \
-            "Virtual Network"
-        
-        # 5. Import Network Security Groups (independent, but required for associations)
-        safe_import "azurerm_network_security_group.aks" \
-            "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.Network/networkSecurityGroups/nsg-aks-devops-eastus" \
-            "AKS Network Security Group"
-        
-        safe_import "azurerm_network_security_group.appgw" \
-            "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.Network/networkSecurityGroups/nsg-appgw-devops-eastus" \
-            "App Gateway Network Security Group"
-        
-        # 6. Import Public IP (independent, but required for App Gateway)
-        safe_import "azurerm_public_ip.appgw" \
-            "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.Network/publicIPAddresses/pip-appgw-devops-eastus" \
-            "Application Gateway Public IP"
-        
-        # 7. Import Subnets (depend on VNet)
-        safe_import "azurerm_subnet.aks" \
-            "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.Network/virtualNetworks/vnet-devops-eastus/subnets/subnet-aks-devops-eastus" \
-            "AKS Subnet"
-        
-        safe_import "azurerm_subnet.appgw" \
-            "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.Network/virtualNetworks/vnet-devops-eastus/subnets/subnet-appgw-devops-eastus" \
-            "App Gateway Subnet"
-        
-        # 8. Import NSG associations (depend on both NSGs and Subnets)
-        safe_import "azurerm_subnet_network_security_group_association.aks" \
-            "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.Network/virtualNetworks/vnet-devops-eastus/subnets/subnet-aks-devops-eastus" \
-            "AKS NSG Association"
-        
-        safe_import "azurerm_subnet_network_security_group_association.appgw" \
-            "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.Network/virtualNetworks/vnet-devops-eastus/subnets/subnet-appgw-devops-eastus" \
-            "App Gateway NSG Association"
-        
-        # 9. Import Application Gateway (depends on subnet and public IP)
-        safe_import "azurerm_application_gateway.main" \
-            "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.Network/applicationGateways/appgw-devops-eastus" \
-            "Application Gateway"
-        
-        # 10. Import AKS cluster (depends on managed identity, subnet, and optionally Log Analytics)
-        safe_import "azurerm_kubernetes_cluster.main" \
-            "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.ContainerService/managedClusters/aks-devops-eastus" \
-            "AKS Cluster"
-        
-        # Re-enable Kubernetes provider after AKS import (if it was successfully imported)
-        echo ""
-        echo "🔧 Re-enabling Kubernetes provider after AKS import..."
-        if terraform state show "azurerm_kubernetes_cluster.main" >/dev/null 2>&1; then
-          echo "   ✅ AKS cluster found in state - enabling Kubernetes provider"
-          if [ -f "kubernetes-providers.tf.disabled" ]; then
-            mv kubernetes-providers.tf.disabled kubernetes-providers.tf
-            echo "   ✅ Kubernetes provider re-enabled"
-            
-            # Re-initialize Terraform with the Kubernetes provider
-            echo "   🔄 Re-initializing Terraform with Kubernetes provider..."
-            terraform init
-          else
-            echo "   ⚠️  kubernetes-providers.tf.disabled not found"
-          fi
-        else
-          echo "   ⚠️  AKS cluster not found in state - keeping Kubernetes provider disabled"
-        fi
-        
-        
-        set -e  # Re-enable exit on error
-        echo ""
-        echo ">> Import process completed"
-        
-        # Verify which resources were actually successfully imported
-        echo ""
-        echo ">> Verifying import results..."
-        echo "================================"
-        
-        # Check each resource we tried to import - simplified version for GitHub Actions compatibility
-        echo "Checking imported resources:"
-        imported_count=0
-        total_resources=13
-        
-        # Check each resource individually
-        if terraform state show "azurerm_user_assigned_identity.aks" >/dev/null 2>&1; then
-            echo "  [SUCCESS] Managed Identity - in Terraform state"
-            ((imported_count++))
-        else
-            echo "  [MISSING] Managed Identity - not in Terraform state"
-        fi
-        
-        if terraform state show "azurerm_log_analytics_workspace.main[0]" >/dev/null 2>&1; then
-            echo "  [SUCCESS] Log Analytics Workspace - in Terraform state"
-            ((imported_count++))
-        else
-            echo "  [MISSING] Log Analytics Workspace - not in Terraform state"
-        fi
-        
-        if terraform state show "azurerm_container_registry.main" >/dev/null 2>&1; then
-            echo "  [SUCCESS] Container Registry - in Terraform state"
-            ((imported_count++))
-        else
-            echo "  [MISSING] Container Registry - not in Terraform state"
-        fi
-        
-        if terraform state show "azurerm_virtual_network.main" >/dev/null 2>&1; then
-            echo "  [SUCCESS] Virtual Network - in Terraform state"
-            ((imported_count++))
-        else
-            echo "  [MISSING] Virtual Network - not in Terraform state"
-        fi
-        
-        if terraform state show "azurerm_network_security_group.aks" >/dev/null 2>&1; then
-            echo "  [SUCCESS] AKS Network Security Group - in Terraform state"
-            ((imported_count++))
-        else
-            echo "  [MISSING] AKS Network Security Group - not in Terraform state"
-        fi
-        
-        if terraform state show "azurerm_network_security_group.appgw" >/dev/null 2>&1; then
-            echo "  [SUCCESS] App Gateway Network Security Group - in Terraform state"
-            ((imported_count++))
-        else
-            echo "  [MISSING] App Gateway Network Security Group - not in Terraform state"
-        fi
-        
-        if terraform state show "azurerm_public_ip.appgw" >/dev/null 2>&1; then
-            echo "  [SUCCESS] Application Gateway Public IP - in Terraform state"
-            ((imported_count++))
-        else
-            echo "  [MISSING] Application Gateway Public IP - not in Terraform state"
-        fi
-        
-        if terraform state show "azurerm_subnet.aks" >/dev/null 2>&1; then
-            echo "  [SUCCESS] AKS Subnet - in Terraform state"
-            ((imported_count++))
-        else
-            echo "  [MISSING] AKS Subnet - not in Terraform state"
-        fi
-        
-        if terraform state show "azurerm_subnet.appgw" >/dev/null 2>&1; then
-            echo "  [SUCCESS] App Gateway Subnet - in Terraform state"
-            ((imported_count++))
-        else
-            echo "  [MISSING] App Gateway Subnet - not in Terraform state"
-        fi
-        
-        if terraform state show "azurerm_subnet_network_security_group_association.aks" >/dev/null 2>&1; then
-            echo "  [SUCCESS] AKS NSG Association - in Terraform state"
-            ((imported_count++))
-        else
-            echo "  [MISSING] AKS NSG Association - not in Terraform state"
-        fi
-        
-        if terraform state show "azurerm_subnet_network_security_group_association.appgw" >/dev/null 2>&1; then
-            echo "  [SUCCESS] App Gateway NSG Association - in Terraform state"
-            ((imported_count++))
-        else
-            echo "  [MISSING] App Gateway NSG Association - not in Terraform state"
-        fi
-        
-        if terraform state show "azurerm_application_gateway.main" >/dev/null 2>&1; then
-            echo "  [SUCCESS] Application Gateway - in Terraform state"
-            ((imported_count++))
-        else
-            echo "  [MISSING] Application Gateway - not in Terraform state"
-        fi
-        
-        if terraform state show "azurerm_kubernetes_cluster.main" >/dev/null 2>&1; then
-            echo "  [SUCCESS] AKS Cluster - in Terraform state"
-            ((imported_count++))
-        else
-            echo "  [MISSING] AKS Cluster - not in Terraform state"
-        fi
-        
-        echo ""
-        echo "Import Summary: $imported_count/$total_resources resources successfully imported into Terraform state"
-        echo ""
-        
-        # Show comprehensive state and comparison
-        echo ""
-        echo ">> Post-Import Analysis:"
-        echo "========================"
-        
-        # Show final Terraform state
-        echo "🔍 Resources in Terraform state:"
-        if terraform_state_list=$(terraform state list | sort); then
-            if [ -n "$terraform_state_list" ]; then
-                echo "$terraform_state_list" | sed 's/^/  /'
-                terraform_count=$(echo "$terraform_state_list" | wc -l)
-            else
-                echo "  (No resources in Terraform state)"
-                terraform_count=0
-            fi
-        else
-            echo "  ❌ Failed to list Terraform state"
-            terraform_count="unknown"
-        fi
-        
-        # Show Azure resources in the resource group
-        echo ""
-        echo "🔍 Resources in Azure resource group ${{ env.AZURE_RESOURCE_GROUP }}:"
-        if azure_resources=$(az resource list --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" --query '[].{Name:name, Type:type}' --output tsv 2>/dev/null | sort); then
-            if [ -n "$azure_resources" ]; then
-                echo "$azure_resources" | sed 's/^/  /'
-                azure_count=$(echo "$azure_resources" | wc -l)
-            else
-                echo "  (No resources found in Azure resource group)"
-                azure_count=0
-            fi
-        else
-            echo "  ❌ Failed to list Azure resources"
-            azure_count="unknown"
-        fi
-        
-        echo ""
-        echo "📊 Import Summary:"
-        echo "  Resources in Terraform state: $terraform_count"
-        echo "  Resources in Azure RG: $azure_count"
-        
-        # If counts differ significantly, provide guidance
-        if [ "$terraform_count" != "unknown" ] && [ "$azure_count" != "unknown" ] && [ "$terraform_count" -lt $((azure_count - 5)) ]; then
-            echo "  ⚠️  Significant difference detected. This could indicate:"
-            echo "     - Some Azure resources are not managed by this Terraform config"
-            echo "     - Import failures due to configuration mismatches"
-            echo "     - Resources created outside of Terraform"
-            echo "     - This is normal if not all Azure resources are supposed to be in Terraform"
-        fi
-        
-        # Final check: Ensure Kubernetes provider is enabled if AKS exists
-        echo "🔍 Final check: Kubernetes provider status..."
-        if terraform state show "azurerm_kubernetes_cluster.main" >/dev/null 2>&1; then
-          if [ ! -f "kubernetes-providers.tf" ]; then
-            echo "   ⚠️  AKS exists but Kubernetes provider is disabled - re-enabling..."
-            if [ -f "kubernetes-providers.tf.disabled" ]; then
-              mv kubernetes-providers.tf.disabled kubernetes-providers.tf
-              terraform init
-              echo "   ✅ Kubernetes provider enabled"
-            else
-              echo "   ❌ kubernetes-providers.tf.disabled not found - this may cause issues"
-            fi
-          else
-            echo "   ✅ Kubernetes provider is properly enabled"
-          fi
-        else
-          echo "   ℹ️  AKS not in state - Kubernetes provider will remain disabled"
-        fi
-        
-        # Validate configuration
-        echo "🔍 Validating Terraform configuration..."
-        if ! terraform validate; then
-          echo "❌ Terraform validation failed"
-          exit 1
-        fi
-        echo "✅ Terraform configuration is valid"
-        
-        # Generate plan file name with timestamp
-        PLAN_FILE="tfplan-${{ github.run_number }}-$(date +%s)"
-        echo "PLAN_FILE=$PLAN_FILE" >> $GITHUB_ENV
-        
-        # Create plan
-        echo "📋 Creating Terraform plan after import..."
-        set +e  # Don't exit on plan errors
-        terraform plan -out=$PLAN_FILE -detailed-exitcode 2>&1 | tee terraform-plan-output.txt
-        PLAN_EXIT_CODE=${PIPESTATUS[0]}
-        set -e  # Re-enable exit on error
-        
-        if [ $PLAN_EXIT_CODE -eq 1 ]; then
-          echo ""
-          echo "❌ Terraform plan failed due to errors"
-          echo ">> Plan error details:"
-          echo "====================="
-          cat terraform-plan-output.txt | tail -50
-          echo ""
-          echo "🔍 Common causes of plan failures after import:"
-          echo "  - Terraform resource configuration doesn't match actual Azure resource"
-          echo "  - Missing or incorrect resource dependencies"
-          echo "  - Imported resource has properties not defined in Terraform"
-          echo "  - Azure resource was modified outside of Terraform"
-          echo ""
-          echo "💡 Troubleshooting steps:"
-          echo "  1. Check if resource definitions in Terraform match actual Azure resources"
-          echo "  2. Verify all required properties are defined in Terraform configuration"
-          echo "  3. Consider updating Terraform config to match current Azure resource state"
-          echo "  4. Check for missing dependencies between resources"
-          exit 1
-        elif [ $PLAN_EXIT_CODE -eq 2 ]; then
-          echo "📋 Terraform plan created with changes to apply"
-          echo "PLAN_HAS_CHANGES=true" >> $GITHUB_ENV
-          echo ">> Plan summary (first 30 lines):"
-          terraform show -no-color $PLAN_FILE 2>/dev/null | head -30 || echo "Could not show plan details"
-        else
-          echo "📋 Terraform plan created with no changes"
-          echo "PLAN_HAS_CHANGES=false" >> $GITHUB_ENV
-        fi
-        
-        # Display plan summary
-        echo "📋 Terraform Plan Summary:"
-        terraform show -no-color $PLAN_FILE
-        
-        # Save plan as artifact for manual review
-        echo "💾 Saving plan for review..."
-        terraform show -json $PLAN_FILE > terraform-plan.json
-        terraform show -no-color $PLAN_FILE > terraform-plan.txt
-        
-        # Check execution mode
-        if [ "${{ env.TERRAFORM_MODE }}" = "plan-only" ]; then
-          echo "📋 Plan-only mode: Terraform plan created and saved"
-          echo "🔍 Review the plan and then run the workflow with 'apply-existing-plan' mode to apply"
-          echo "DEPLOYMENT_SUCCESS=plan-created" >> $GITHUB_OUTPUT
-          echo "PLAN_FILE=$PLAN_FILE" >> $GITHUB_OUTPUT
-        elif [ "${{ env.TERRAFORM_MODE }}" = "apply-existing-plan" ]; then
-          # Look for existing plan file
-          EXISTING_PLAN=$(ls -t tfplan-* 2>/dev/null | head -n 1 || echo "")
-          if [ -z "$EXISTING_PLAN" ]; then
-            echo "❌ No existing plan found. Please run in 'plan-only' mode first."
-            echo "DEPLOYMENT_SUCCESS=false" >> $GITHUB_OUTPUT
-          else
-            echo "🚀 Applying existing plan: $EXISTING_PLAN"
-            if terraform apply -auto-approve "$EXISTING_PLAN"; then
-              echo "✅ Terraform apply completed successfully"
-              echo "DEPLOYMENT_SUCCESS=true" >> $GITHUB_OUTPUT
-            else
-              echo "❌ Terraform apply failed"
-              echo "DEPLOYMENT_SUCCESS=false" >> $GITHUB_OUTPUT
-            fi
-          fi
-        else
-          # plan-and-apply mode
-          echo "🚀 Applying Terraform plan immediately..."
-          if terraform apply -auto-approve $PLAN_FILE; then
-            echo "✅ Terraform deployment successful"
-            echo "DEPLOYMENT_SUCCESS=true" >> $GITHUB_OUTPUT
-          else
-            echo "❌ Terraform deployment failed"
-            echo "DEPLOYMENT_SUCCESS=false" >> $GITHUB_OUTPUT
-            exit 1
-          fi
-        fi
-        
-        # Capture outputs if deployment was successful
-        if [ "${{ env.TERRAFORM_MODE }}" != "plan-only" ]; then
-          echo "📋 Extracting Terraform outputs..."
-          set +e  # Don't exit if output extraction fails
-          AKS_CLUSTER_NAME=$(terraform output -raw AKS_CLUSTER_NAME 2>/dev/null || echo "")
-          AZURE_RESOURCE_GROUP=$(terraform output -raw AZURE_RESOURCE_GROUP 2>/dev/null || echo "${{ env.AZURE_RESOURCE_GROUP }}")
-          CONTAINER_REGISTRY_ENDPOINT=$(terraform output -raw CONTAINER_REGISTRY_ENDPOINT 2>/dev/null || echo "")
-          set -e
-          
-          echo "AKS_CLUSTER_NAME=$AKS_CLUSTER_NAME" >> $GITHUB_OUTPUT
-          echo "AZURE_RESOURCE_GROUP=$AZURE_RESOURCE_GROUP" >> $GITHUB_OUTPUT
-          echo "CONTAINER_REGISTRY_ENDPOINT=$CONTAINER_REGISTRY_ENDPOINT" >> $GITHUB_OUTPUT
-          echo "DEPLOYMENT_METHOD=terraform" >> $GITHUB_OUTPUT
-          
-          echo "✅ Infrastructure deployed successfully with Terraform!"
-          echo "   AKS Cluster: $AKS_CLUSTER_NAME"
-          echo "   Resource Group: $AZURE_RESOURCE_GROUP"
-          echo "   Container Registry: $CONTAINER_REGISTRY_ENDPOINT"
-          
-          # Final cleanup: Ensure Kubernetes provider is properly enabled for future runs
-          echo ""
-          echo "🔧 Final cleanup: Ensuring Kubernetes provider state is correct..."
-          if [ -f "kubernetes-providers.tf.disabled" ]; then
-            echo "   ⚠️  Found disabled Kubernetes provider - moving to correct location"
-            mv kubernetes-providers.tf.disabled kubernetes-providers.tf
-            echo "   ✅ Kubernetes provider file restored to correct location"
-          else
-            echo "   ✅ Kubernetes provider state is already correct"
-          fi
-        fi
+        # Run the master deployment script that orchestrates everything
+        ../../scripts/terraform/terraform-master.sh "${{ env.TERRAFORM_MODE }}" "${{ github.event.inputs.debug_mode }}"
 
     - name: Cleanup Kubernetes Provider (Always Run)
       if: always() && (env.INFRASTRUCTURE_METHOD == 'terraform' || env.INFRASTRUCTURE_METHOD == 'both')
       run: |
         cd infra/terraform
-        echo "🔧 Cleanup: Ensuring Kubernetes provider is restored..."
-        
-        # Always try to restore the Kubernetes provider file if it was disabled
-        if [ -f "kubernetes-providers.tf.disabled" ]; then
-          echo "   🔄 Restoring kubernetes-providers.tf from disabled state"
-          mv kubernetes-providers.tf.disabled kubernetes-providers.tf
-          echo "   ✅ Kubernetes provider file restored"
-        else
-          echo "   ✅ No cleanup needed - Kubernetes provider was not disabled or already restored"
-        fi
+        ../../scripts/terraform/terraform-provider-helper.sh cleanup
 
     - name: Upload Terraform Plan Artifacts
       if: ${{ env.INFRASTRUCTURE_METHOD == 'terraform' || env.INFRASTRUCTURE_METHOD == 'both' }}
@@ -794,7 +281,7 @@ jobs:
         retention-days: 7
 
     - name: Pre-deployment Diagnostics
-      if: ${{ steps.deploy-infra-terraform.outputs.DEPLOYMENT_SUCCESS != 'true' && env.INFRASTRUCTURE_METHOD == 'arm' }}
+      if: ${{ steps.terraform-deploy.outputs.DEPLOYMENT_SUCCESS != 'true' && env.INFRASTRUCTURE_METHOD == 'arm' }}
       run: |
         echo "🔍 Running pre-deployment diagnostics for ARM template fallback..."
         
@@ -834,7 +321,7 @@ jobs:
 
     - name: Deploy Infrastructure with ARM Template (Fallback)
       id: deploy-infra-arm
-      if: ${{ env.INFRASTRUCTURE_METHOD == 'arm' || (env.INFRASTRUCTURE_METHOD == 'both' && steps.deploy-infra-terraform.outputs.DEPLOYMENT_SUCCESS != 'true') }}
+      if: ${{ env.INFRASTRUCTURE_METHOD == 'arm' || (env.INFRASTRUCTURE_METHOD == 'both' && steps.terraform-deploy.outputs.DEPLOYMENT_SUCCESS != 'true') }}
       run: |
         echo "🚀 Deploying infrastructure using ARM template..."
         
@@ -902,11 +389,11 @@ jobs:
       id: deploy-infra
       run: |
         # Use outputs from whichever deployment method succeeded
-        if [ "${{ steps.deploy-infra-terraform.outputs.DEPLOYMENT_SUCCESS }}" = "true" ]; then
+        if [ "${{ steps.terraform-deploy.outputs.DEPLOYMENT_SUCCESS }}" = "true" ]; then
           echo "Using Terraform deployment outputs"
-          echo "AKS_CLUSTER_NAME=${{ steps.deploy-infra-terraform.outputs.AKS_CLUSTER_NAME }}" >> $GITHUB_OUTPUT
-          echo "AZURE_RESOURCE_GROUP=${{ steps.deploy-infra-terraform.outputs.AZURE_RESOURCE_GROUP }}" >> $GITHUB_OUTPUT
-          echo "CONTAINER_REGISTRY_ENDPOINT=${{ steps.deploy-infra-terraform.outputs.CONTAINER_REGISTRY_ENDPOINT }}" >> $GITHUB_OUTPUT
+          echo "AKS_CLUSTER_NAME=${{ steps.terraform-deploy.outputs.AKS_CLUSTER_NAME }}" >> $GITHUB_OUTPUT
+          echo "AZURE_RESOURCE_GROUP=${{ steps.terraform-deploy.outputs.AZURE_RESOURCE_GROUP }}" >> $GITHUB_OUTPUT
+          echo "CONTAINER_REGISTRY_ENDPOINT=${{ steps.terraform-deploy.outputs.CONTAINER_REGISTRY_ENDPOINT }}" >> $GITHUB_OUTPUT
           echo "DEPLOYMENT_SUCCESS=true" >> $GITHUB_OUTPUT
           echo "✅ Used Terraform for deployment" >> $GITHUB_STEP_SUMMARY
         elif [ "${{ steps.deploy-infra-arm.outputs.DEPLOYMENT_SUCCESS }}" = "true" ]; then
@@ -918,7 +405,7 @@ jobs:
           echo "✅ Used ARM template for deployment" >> $GITHUB_STEP_SUMMARY
         else
           echo "❌ All deployment methods failed or returned empty outputs" >> $GITHUB_STEP_SUMMARY
-          echo "Terraform success: ${{ steps.deploy-infra-terraform.outputs.DEPLOYMENT_SUCCESS }}"
+          echo "Terraform success: ${{ steps.terraform-deploy.outputs.DEPLOYMENT_SUCCESS }}"
           echo "ARM success: ${{ steps.deploy-infra-arm.outputs.DEPLOYMENT_SUCCESS }}"
           echo "DEPLOYMENT_SUCCESS=false" >> $GITHUB_OUTPUT
           exit 1
@@ -928,11 +415,11 @@ jobs:
       run: |
         echo ""
         echo "=== Final Deployment Results ==="
-        if [ "${{ steps.deploy-infra-terraform.outputs.DEPLOYMENT_SUCCESS }}" = "true" ]; then
+        if [ "${{ steps.terraform-deploy.outputs.DEPLOYMENT_SUCCESS }}" = "true" ]; then
           echo "✅ Deployment Method: Terraform"
-          echo "AKS Cluster Name: ${{ steps.deploy-infra-terraform.outputs.AKS_CLUSTER_NAME }}"
-          echo "Resource Group: ${{ steps.deploy-infra-terraform.outputs.AZURE_RESOURCE_GROUP }}"
-          echo "Container Registry: ${{ steps.deploy-infra-terraform.outputs.CONTAINER_REGISTRY_ENDPOINT }}"
+          echo "AKS Cluster Name: ${{ steps.terraform-deploy.outputs.AKS_CLUSTER_NAME }}"
+          echo "Resource Group: ${{ steps.terraform-deploy.outputs.AZURE_RESOURCE_GROUP }}"
+          echo "Container Registry: ${{ steps.terraform-deploy.outputs.CONTAINER_REGISTRY_ENDPOINT }}"
         elif [ "${{ steps.deploy-infra-arm.outputs.DEPLOYMENT_SUCCESS }}" = "true" ]; then
           echo "✅ Deployment Method: ARM Template"
           echo "AKS Cluster Name: ${{ steps.deploy-infra-arm.outputs.AKS_CLUSTER_NAME }}"
