@@ -188,12 +188,12 @@ az aks get-credentials \
   --name aks-devops-eastus
 
 # Deploy Zabbix components
-kubectl apply -f k8s/zabbix-config.yaml
-kubectl apply -f k8s/zabbix-mysql.yaml
-kubectl apply -f k8s/zabbix-additional.yaml
-kubectl apply -f k8s/zabbix-server.yaml
-kubectl apply -f k8s/zabbix-web.yaml
-kubectl apply -f k8s/zabbix-ingress.yaml
+kubectl apply -f applications/zabbix/k8s/zabbix-config.yaml
+kubectl apply -f applications/zabbix/k8s/zabbix-mysql.yaml
+kubectl apply -f applications/zabbix/k8s/zabbix-additional.yaml
+kubectl apply -f applications/zabbix/k8s/zabbix-server.yaml
+kubectl apply -f applications/zabbix/k8s/zabbix-web.yaml
+kubectl apply -f applications/zabbix/k8s/zabbix-ingress.yaml
 
 # Wait for deployment
 kubectl wait --for=condition=available deployment --all -n zabbix --timeout=600s
@@ -296,13 +296,15 @@ After successful deployment:
 │   │   ├── terraform.tfvars.example  # Example variables file
 │   │   └── README.md         # Terraform-specific documentation
 │   └── main-arm.json         # ARM template (fallback)
-├── k8s/
-│   ├── zabbix-config.yaml     # Namespace and configuration
-│   ├── zabbix-mysql.yaml      # MySQL database
-│   ├── zabbix-server.yaml     # Zabbix server
-│   ├── zabbix-web.yaml        # Web interface
-│   ├── zabbix-ingress.yaml    # Ingress configuration
-│   └── zabbix-additional.yaml # Java Gateway and Proxy
+├── applications/
+│   └── zabbix/
+│       └── k8s/                # Zabbix Kubernetes manifests  
+│           ├── zabbix-config.yaml   # Namespace and configuration
+│           ├── zabbix-mysql.yaml    # MySQL database
+│           ├── zabbix-server.yaml   # Zabbix server
+│           ├── zabbix-web.yaml      # Web interface
+│           ├── zabbix-ingress.yaml  # Ingress configuration
+│           └── zabbix-additional.yaml # Java Gateway and Proxy
 ├── scripts/
 │   ├── deploy-infrastructure-pwsh.ps1  # PowerShell deployment script
 │   └── verify-deployment-readiness.ps1 # Validation script
@@ -332,7 +334,7 @@ resources:
 
 ### Database Configuration
 
-Update MySQL configuration in `k8s/zabbix-mysql.yaml`:
+Update MySQL configuration in `applications/zabbix/k8s/zabbix-mysql.yaml`:
 
 ```yaml
 args:
@@ -343,7 +345,7 @@ args:
 
 ### Zabbix Server Parameters
 
-Modify Zabbix server configuration in `k8s/zabbix-config.yaml`:
+Modify Zabbix server configuration in `applications/zabbix/k8s/zabbix-config.yaml`:
 
 ```yaml
 data:

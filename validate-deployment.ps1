@@ -200,7 +200,7 @@ if ($mysqlPods) {
         Write-Host "✅ Database is initialized with $tableCount tables" -ForegroundColor Green
     } else {
         Write-Host "⚠️  Database might not be properly initialized (found $tableCount tables)" -ForegroundColor Yellow
-        Write-Host "🔧 Consider running: kubectl apply -f k8s/zabbix-db-init-direct.yaml" -ForegroundColor Blue
+        Write-Host "🔧 Consider running: kubectl apply -f applications/zabbix/k8s/zabbix-db-init-direct.yaml" -ForegroundColor Blue
     }
 } else {
     Write-Host "❌ MySQL pod not found" -ForegroundColor Red

@@ -66,12 +66,12 @@ terraform apply tfplan
 az aks get-credentials --resource-group rg-devops-pops-eastus --name aks-devops-eastus
 
 # Deploy Zabbix
-kubectl apply -f k8s/zabbix-config.yaml
-kubectl apply -f k8s/zabbix-mysql.yaml
-kubectl apply -f k8s/zabbix-additional.yaml
-kubectl apply -f k8s/zabbix-server.yaml
-kubectl apply -f k8s/zabbix-web.yaml
-kubectl apply -f k8s/zabbix-ingress.yaml
+kubectl apply -f applications/zabbix/k8s/zabbix-config.yaml
+kubectl apply -f applications/zabbix/k8s/zabbix-mysql.yaml
+kubectl apply -f applications/zabbix/k8s/zabbix-additional.yaml
+kubectl apply -f applications/zabbix/k8s/zabbix-server.yaml
+kubectl apply -f applications/zabbix/k8s/zabbix-web.yaml
+kubectl apply -f applications/zabbix/k8s/zabbix-ingress.yaml
 ```
 
 ## Deployment Types Explained

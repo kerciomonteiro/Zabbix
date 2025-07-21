@@ -573,7 +573,7 @@ jobs:
 
     - name: Deploy Zabbix Namespace and Configuration
       run: |
-        kubectl apply -f k8s/zabbix-config.yaml
+        kubectl apply -f applications/zabbix/k8s/zabbix-config.yaml
         kubectl get namespace zabbix
 
     - name: Cleanup Existing Zabbix Resources (Conditional)
@@ -621,7 +621,7 @@ jobs:
 
     - name: Deploy MySQL Database
       run: |
-        kubectl apply -f k8s/zabbix-mysql.yaml
+        kubectl apply -f applications/zabbix/k8s/zabbix-mysql.yaml
         
         # Wait for MySQL to be ready
         kubectl wait --for=condition=ready pod -l app=zabbix-mysql -n zabbix --timeout=600s
@@ -656,7 +656,7 @@ jobs:
     - name: Deploy Zabbix Server
       run: |
         echo "🚀 Deploying Zabbix Server..."
-        kubectl apply -f k8s/zabbix-server.yaml
+        kubectl apply -f applications/zabbix/k8s/zabbix-server.yaml
         
         # Wait for Zabbix server to be ready
         kubectl wait --for=condition=ready pod -l app=zabbix-server -n zabbix --timeout=600s
@@ -668,7 +668,7 @@ jobs:
     - name: Deploy Zabbix Web Frontend
       run: |
         echo "🌐 Deploying Zabbix Web Frontend..."
-        kubectl apply -f k8s/zabbix-web.yaml
+        kubectl apply -f applications/zabbix/k8s/zabbix-web.yaml
         
         # Wait for web frontend to be ready
         kubectl wait --for=condition=ready pod -l app=zabbix-web -n zabbix --timeout=300s
@@ -677,35 +677,30 @@ jobs:
         kubectl get pods -n zabbix -l app=zabbix-web
         echo "✅ Zabbix Web Frontend deployed successfully"
 
-    - name: Deploy Zabbix Agent
+    - name: Deploy Zabbix Additional Components
       run: |
-        echo "📊 Deploying Zabbix Agent..."
-        kubectl apply -f k8s/zabbix-agent.yaml
+        echo "📊 Deploying Zabbix additional components (Java Gateway, Proxy)..."
+        kubectl apply -f applications/zabbix/k8s/zabbix-additional.yaml
         
-        # Wait for agent to be ready
-        kubectl wait --for=condition=ready pod -l app=zabbix-agent -n zabbix --timeout=180s
+        # Wait for additional components to be ready
+        kubectl wait --for=condition=ready pod -l app=zabbix-java-gateway -n zabbix --timeout=180s || echo "⚠️ Java Gateway may still be starting"
+        kubectl wait --for=condition=ready pod -l app=zabbix-proxy -n zabbix --timeout=180s || echo "⚠️ Proxy may still be starting"
         
-        # Verify agent is running
-        kubectl get pods -n zabbix -l app=zabbix-agent
-        echo "✅ Zabbix Agent deployed successfully"
+        # Verify additional components are running
+        kubectl get pods -n zabbix -l app=zabbix-java-gateway
+        kubectl get pods -n zabbix -l app=zabbix-proxy
+        echo "✅ Zabbix additional components deployed successfully"
 
-    - name: Create Services and Ingress
+    - name: Deploy Zabbix Ingress
       run: |
-        echo "🔗 Creating Zabbix services and ingress..."
-        
-        # Apply services
-        kubectl apply -f k8s/zabbix-services.yaml
+        echo "🔗 Creating Zabbix ingress..."
         
         # Apply ingress
-        kubectl apply -f k8s/zabbix-ingress.yaml
+        kubectl apply -f applications/zabbix/k8s/zabbix-ingress.yaml
         
-        # Wait for services to be ready
-        kubectl wait --for=condition=ready service/zabbix-web -n zabbix --timeout=60s
-        
-        # Show service information
-        kubectl get services -n zabbix
+        # Show ingress information
         kubectl get ingress -n zabbix
-        echo "✅ Services and Ingress created successfully"
+        echo "✅ Ingress created successfully"
 
     - name: Verify Zabbix Deployment
       run: |
@@ -795,13 +790,12 @@ jobs:
         kubectl create namespace zabbix --dry-run=client -o yaml | kubectl apply -f -
         
         # Apply all Zabbix resources
-        kubectl apply -f k8s/zabbix-config.yaml
-        kubectl apply -f k8s/zabbix-mysql.yaml
-        kubectl apply -f k8s/zabbix-server.yaml  
-        kubectl apply -f k8s/zabbix-web.yaml
-        kubectl apply -f k8s/zabbix-agent.yaml
-        kubectl apply -f k8s/zabbix-services.yaml
-        kubectl apply -f k8s/zabbix-ingress.yaml
+        kubectl apply -f applications/zabbix/k8s/zabbix-config.yaml
+        kubectl apply -f applications/zabbix/k8s/zabbix-mysql.yaml
+        kubectl apply -f applications/zabbix/k8s/zabbix-server.yaml  
+        kubectl apply -f applications/zabbix/k8s/zabbix-web.yaml
+        kubectl apply -f applications/zabbix/k8s/zabbix-additional.yaml
+        kubectl apply -f applications/zabbix/k8s/zabbix-ingress.yaml
         
         # Wait for all pods to be ready
         echo "⏳ Waiting for all Zabbix components to be ready..."

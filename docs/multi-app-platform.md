@@ -223,7 +223,7 @@ terraform apply
 az aks get-credentials --resource-group <resource-group> --name <cluster-name>
 
 # Deploy Zabbix
-kubectl apply -f k8s/zabbix/
+kubectl apply -f applications/zabbix/k8s/
 
 # Deploy other applications
 kubectl apply -f k8s/<app-name>/

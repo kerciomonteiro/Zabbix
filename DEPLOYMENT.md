@@ -148,7 +148,7 @@ kubectl exec -it <mysql-pod> -n zabbix -- mysql -u root -pZabbixRoot123! -e "SHO
 
 # Reinitialize database
 kubectl delete job zabbix-db-init -n zabbix
-kubectl apply -f k8s/zabbix-db-init-direct.yaml
+kubectl apply -f applications/zabbix/k8s/zabbix-db-init-direct.yaml
 ```
 
 #### 3. Ingress Not Working
@@ -183,8 +183,8 @@ kubectl apply -f k8s/
 ```bash
 kubectl delete pvc -n zabbix --all
 kubectl delete job zabbix-db-init -n zabbix
-kubectl apply -f k8s/zabbix-mysql.yaml
-kubectl apply -f k8s/zabbix-db-init-direct.yaml
+kubectl apply -f applications/zabbix/k8s/zabbix-mysql.yaml
+kubectl apply -f applications/zabbix/k8s/zabbix-db-init-direct.yaml
 ```
 
 ## 🔒 Security Considerations

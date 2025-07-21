@@ -29,7 +29,7 @@ try {
 
     # Deploy Zabbix configuration
     Write-Host "⚙️ Deploying Zabbix configuration..." -ForegroundColor Yellow
-    kubectl apply -f k8s/zabbix-config.yaml
+    kubectl apply -f applications/zabbix/k8s/zabbix-config.yaml
 
     # Conditional cleanup
     if ($ResetDatabase) {
@@ -45,7 +45,7 @@ try {
 
     # Deploy MySQL
     Write-Host "🗄️ Deploying MySQL database..." -ForegroundColor Yellow
-    kubectl apply -f k8s/zabbix-mysql.yaml
+    kubectl apply -f applications/zabbix/k8s/zabbix-mysql.yaml
     
     Write-Host "⏳ Waiting for MySQL to be ready..." -ForegroundColor Yellow
     kubectl wait --for=condition=ready pod -l app=zabbix-mysql -n $NAMESPACE --timeout=600s
@@ -64,7 +64,7 @@ try {
         kubectl exec -n $NAMESPACE $MYSQL_POD -- mysql -u root -pZabbixRoot123! -e "DROP DATABASE IF EXISTS zabbix;"
         kubectl exec -n $NAMESPACE $MYSQL_POD -- mysql -u root -pZabbixRoot123! -e "CREATE DATABASE zabbix CHARACTER SET utf8 COLLATE utf8_bin;"
         kubectl exec -n $NAMESPACE $MYSQL_POD -- mysql -u root -pZabbixRoot123! -e "GRANT ALL PRIVILEGES ON zabbix.* TO 'zabbix'@'%' IDENTIFIED BY 'zabbix123!';"
-        kubectl apply -f k8s/zabbix-db-init-direct.yaml
+        kubectl apply -f applications/zabbix/k8s/zabbix-db-init-direct.yaml
         kubectl wait --for=condition=complete job/zabbix-db-init -n $NAMESPACE --timeout=600s
     } else {
         Write-Host "✅ Database already exists with $DB_EXISTS tables" -ForegroundColor Green
@@ -74,19 +74,19 @@ try {
     Write-Host "🚀 Deploying Zabbix components..." -ForegroundColor Yellow
     
     # Java Gateway
-    kubectl apply -f k8s/zabbix-additional.yaml
+    kubectl apply -f applications/zabbix/k8s/zabbix-additional.yaml
     kubectl wait --for=condition=available deployment/zabbix-java-gateway -n $NAMESPACE --timeout=300s
     
     # Zabbix Server  
-    kubectl apply -f k8s/zabbix-server.yaml
+    kubectl apply -f applications/zabbix/k8s/zabbix-server.yaml
     kubectl wait --for=condition=available deployment/zabbix-server -n $NAMESPACE --timeout=300s
     
     # Zabbix Web
-    kubectl apply -f k8s/zabbix-web.yaml
+    kubectl apply -f applications/zabbix/k8s/zabbix-web.yaml
     kubectl wait --for=condition=available deployment/zabbix-web -n $NAMESPACE --timeout=300s
     
     # Ingress
-    kubectl apply -f k8s/zabbix-ingress.yaml
+    kubectl apply -f applications/zabbix/k8s/zabbix-ingress.yaml
 
     # Display results
     Write-Host "✅ Deployment completed successfully!" -ForegroundColor Green
