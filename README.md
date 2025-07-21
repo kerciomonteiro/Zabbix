@@ -1,4 +1,4 @@
-# Zabbix Server on Azure Kubernetes Service (AKS)
+#  Zabbix Server on Azure Kubernetes Service (AKS)
 
 > **✅ Status: FULLY OPERATIONAL** - All deployment issues resolved, 502 Bad Gateway fixed, Zabbix accessible via Application Gateway
 
