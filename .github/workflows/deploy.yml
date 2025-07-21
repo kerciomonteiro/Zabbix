@@ -256,6 +256,15 @@ jobs:
         echo "📦 Initializing Terraform..."
         terraform init
         
+        # Temporarily disable Kubernetes provider during import to prevent configuration errors
+        echo "🔧 Temporarily disabling Kubernetes provider during import phase..."
+        if [ -f "kubernetes-providers.tf" ]; then
+          mv kubernetes-providers.tf kubernetes-providers.tf.disabled
+          echo "   ✅ Kubernetes provider temporarily disabled"
+        else
+          echo "   ⚠️  kubernetes-providers.tf not found - continuing anyway"
+        fi
+        
         # Import existing resources if they exist (ignore errors for non-existent resources)
         echo "📦 Attempting to import existing resources..."
         set +e  # Don't exit on import errors
@@ -436,6 +445,25 @@ jobs:
             "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.ContainerService/managedClusters/aks-devops-eastus" \
             "AKS Cluster"
         
+        # Re-enable Kubernetes provider after AKS import (if it was successfully imported)
+        echo ""
+        echo "🔧 Re-enabling Kubernetes provider after AKS import..."
+        if terraform state show "azurerm_kubernetes_cluster.main" >/dev/null 2>&1; then
+          echo "   ✅ AKS cluster found in state - enabling Kubernetes provider"
+          if [ -f "kubernetes-providers.tf.disabled" ]; then
+            mv kubernetes-providers.tf.disabled kubernetes-providers.tf
+            echo "   ✅ Kubernetes provider re-enabled"
+            
+            # Re-initialize Terraform with the Kubernetes provider
+            echo "   🔄 Re-initializing Terraform with Kubernetes provider..."
+            terraform init
+          else
+            echo "   ⚠️  kubernetes-providers.tf.disabled not found"
+          fi
+        else
+          echo "   ⚠️  AKS cluster not found in state - keeping Kubernetes provider disabled"
+        fi
+        
         
         set -e  # Re-enable exit on error
         echo ""
@@ -526,6 +554,25 @@ jobs:
             echo "     - Import failures due to configuration mismatches"
             echo "     - Resources created outside of Terraform"
             echo "     - This is normal if not all Azure resources are supposed to be in Terraform"
+        fi
+        
+        # Final check: Ensure Kubernetes provider is enabled if AKS exists
+        echo "🔍 Final check: Kubernetes provider status..."
+        if terraform state show "azurerm_kubernetes_cluster.main" >/dev/null 2>&1; then
+          if [ ! -f "kubernetes-providers.tf" ]; then
+            echo "   ⚠️  AKS exists but Kubernetes provider is disabled - re-enabling..."
+            if [ -f "kubernetes-providers.tf.disabled" ]; then
+              mv kubernetes-providers.tf.disabled kubernetes-providers.tf
+              terraform init
+              echo "   ✅ Kubernetes provider enabled"
+            else
+              echo "   ❌ kubernetes-providers.tf.disabled not found - this may cause issues"
+            fi
+          else
+            echo "   ✅ Kubernetes provider is properly enabled"
+          fi
+        else
+          echo "   ℹ️  AKS not in state - Kubernetes provider will remain disabled"
         fi
         
         # Validate configuration
@@ -637,6 +684,32 @@ jobs:
           echo "   AKS Cluster: $AKS_CLUSTER_NAME"
           echo "   Resource Group: $AZURE_RESOURCE_GROUP"
           echo "   Container Registry: $CONTAINER_REGISTRY_ENDPOINT"
+          
+          # Final cleanup: Ensure Kubernetes provider is properly enabled for future runs
+          echo ""
+          echo "🔧 Final cleanup: Ensuring Kubernetes provider state is correct..."
+          if [ -f "kubernetes-providers.tf.disabled" ]; then
+            echo "   ⚠️  Found disabled Kubernetes provider - moving to correct location"
+            mv kubernetes-providers.tf.disabled kubernetes-providers.tf
+            echo "   ✅ Kubernetes provider file restored to correct location"
+          else
+            echo "   ✅ Kubernetes provider state is already correct"
+          fi
+        fi
+
+    - name: Cleanup Kubernetes Provider (Always Run)
+      if: always() && (env.INFRASTRUCTURE_METHOD == 'terraform' || env.INFRASTRUCTURE_METHOD == 'both')
+      run: |
+        cd infra/terraform
+        echo "🔧 Cleanup: Ensuring Kubernetes provider is restored..."
+        
+        # Always try to restore the Kubernetes provider file if it was disabled
+        if [ -f "kubernetes-providers.tf.disabled" ]; then
+          echo "   🔄 Restoring kubernetes-providers.tf from disabled state"
+          mv kubernetes-providers.tf.disabled kubernetes-providers.tf
+          echo "   ✅ Kubernetes provider file restored"
+        else
+          echo "   ✅ No cleanup needed - Kubernetes provider was not disabled or already restored"
         fi
 
     - name: Upload Terraform Plan Artifacts

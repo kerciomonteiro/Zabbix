@@ -1,23 +1,6 @@
-# Kubernetes Provider Configuration
-# This enables direct Kubernetes resource management
-
-# Configure Kubernetes provider
-provider "kubernetes" {
-  host                   = azurerm_kubernetes_cluster.main.kube_config.0.host
-  client_certificate     = base64decode(azurerm_kubernetes_cluster.main.kube_config.0.client_certificate)
-  client_key             = base64decode(azurerm_kubernetes_cluster.main.kube_config.0.client_key)
-  cluster_ca_certificate = base64decode(azurerm_kubernetes_cluster.main.kube_config.0.cluster_ca_certificate)
-}
-
-# Configure Helm provider
-provider "helm" {
-  kubernetes {
-    host                   = azurerm_kubernetes_cluster.main.kube_config.0.host
-    client_certificate     = base64decode(azurerm_kubernetes_cluster.main.kube_config.0.client_certificate)
-    client_key             = base64decode(azurerm_kubernetes_cluster.main.kube_config.0.client_key)
-    cluster_ca_certificate = base64decode(azurerm_kubernetes_cluster.main.kube_config.0.cluster_ca_certificate)
-  }
-}
+# Kubernetes Resources Configuration
+# This file contains all Kubernetes resources that will be created after AKS is deployed
+# The provider configuration is in kubernetes-providers.tf
 
 # Create application namespaces
 resource "kubernetes_namespace" "applications" {
