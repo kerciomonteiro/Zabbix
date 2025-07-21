@@ -91,5 +91,25 @@ resource "time_sleep" "wait_for_identity" {
 resource "time_sleep" "wait_for_cluster" {
   depends_on = [azurerm_kubernetes_cluster.main]
   
-  create_duration = "30s"
+  create_duration = "90s"
+}
+
+# Ensure AKS cluster is ready and kubeconfig is available
+resource "null_resource" "verify_cluster_ready" {
+  depends_on = [
+    azurerm_kubernetes_cluster.main,
+    time_sleep.wait_for_cluster
+  ]
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      az aks get-credentials --resource-group ${azurerm_kubernetes_cluster.main.resource_group_name} --name ${azurerm_kubernetes_cluster.main.name} --overwrite-existing
+      kubectl cluster-info --request-timeout=30s
+    EOT
+  }
+
+  # Trigger re-run if cluster configuration changes
+  triggers = {
+    cluster_id = azurerm_kubernetes_cluster.main.id
+  }
 }

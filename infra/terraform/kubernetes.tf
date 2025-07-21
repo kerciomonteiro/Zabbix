@@ -14,7 +14,9 @@ resource "kubernetes_namespace" "applications" {
 
   depends_on = [
     azurerm_kubernetes_cluster.main,
-    time_sleep.wait_for_cluster
+    time_sleep.wait_for_cluster,
+    null_resource.verify_cluster_ready,
+    null_resource.k8s_resources_ready
   ]
 }
 
@@ -41,7 +43,9 @@ resource "kubernetes_resource_quota" "application_quotas" {
 
   depends_on = [
     kubernetes_namespace.applications,
-    time_sleep.wait_for_cluster
+    time_sleep.wait_for_cluster,
+    null_resource.verify_cluster_ready,
+    null_resource.k8s_resources_ready
   ]
 }
 
@@ -115,7 +119,9 @@ resource "kubernetes_network_policy" "namespace_isolation" {
 
   depends_on = [
     kubernetes_namespace.applications,
-    time_sleep.wait_for_cluster
+    time_sleep.wait_for_cluster,
+    null_resource.verify_cluster_ready,
+    null_resource.k8s_resources_ready
   ]
 }
 
@@ -135,7 +141,9 @@ resource "kubernetes_storage_class" "workload_storage" {
 
   depends_on = [
     azurerm_kubernetes_cluster.main,
-    time_sleep.wait_for_cluster
+    time_sleep.wait_for_cluster,
+    null_resource.verify_cluster_ready,
+    null_resource.k8s_resources_ready
   ]
 }
 
@@ -157,6 +165,8 @@ resource "kubernetes_labels" "pod_security_standards" {
 
   depends_on = [
     kubernetes_namespace.applications,
-    time_sleep.wait_for_cluster
+    time_sleep.wait_for_cluster,
+    null_resource.verify_cluster_ready,
+    null_resource.k8s_resources_ready
   ]
 }

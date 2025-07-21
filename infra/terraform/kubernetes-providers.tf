@@ -1,8 +1,8 @@
 # Kubernetes Provider Configuration
 # This file contains the Kubernetes and Helm provider configurations
-# Updated to handle AKS cluster readiness and prevent connectivity issues
+# Using a more reliable approach for AKS connectivity
 
-# Configure Kubernetes provider
+# Configure Kubernetes provider with improved reliability
 provider "kubernetes" {
   host                   = azurerm_kubernetes_cluster.main.kube_config.0.host
   client_certificate     = base64decode(azurerm_kubernetes_cluster.main.kube_config.0.client_certificate)

@@ -1,0 +1,70 @@
+# Kubernetes Resource Pre-Deployment Handler
+# This script should be run BEFORE terraform apply in CI/CD pipelines
+# It handles "already exists" errors by importing existing resources
+
+name: Handle Kubernetes Resource Conflicts
+
+on:
+  workflow_call:
+
+jobs:
+  handle-k8s-conflicts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup kubectl
+        run: |
+          # Ensure kubectl is available and configured
+          kubectl version --client
+          kubectl cluster-info
+          
+      - name: Import Existing Kubernetes Resources
+        shell: bash
+        run: |
+          set -e
+          
+          echo "🔧 Handling Kubernetes resource conflicts..."
+          
+          # Function to safely import resource
+          import_resource() {
+            local addr="$1"
+            local id="$2" 
+            local name="$3"
+            
+            echo "Checking $name..."
+            
+            # Check if already in state
+            if terraform state show "$addr" >/dev/null 2>&1; then
+              echo "  ✅ $name already in Terraform state"
+              return 0
+            fi
+            
+            # Attempt import
+            echo "  🔄 Importing $name..."
+            if terraform import "$addr" "$id" >/dev/null 2>&1; then
+              echo "  ✅ Successfully imported $name"
+            else
+              echo "  ⚠️  Import failed for $name (may be created during apply)"
+            fi
+          }
+          
+          # Import critical resources that commonly cause "already exists" errors
+          import_resource 'kubernetes_namespace.applications["zabbix"]' 'zabbix' 'namespace zabbix'
+          import_resource 'kubernetes_storage_class.workload_storage["standard"]' 'standard-ssd' 'storage class standard-ssd'
+          import_resource 'kubernetes_storage_class.workload_storage["fast"]' 'fast-ssd' 'storage class fast-ssd'
+          
+          # Import additional resources (these may fail silently)
+          terraform import 'kubernetes_labels.pod_security_standards["zabbix"]' 'apiVersion=v1,kind=Namespace,name=zabbix' >/dev/null 2>&1 || true
+          terraform import 'kubernetes_resource_quota.application_quotas["zabbix"]' 'zabbix/zabbix-quota' >/dev/null 2>&1 || true
+          terraform import 'kubernetes_network_policy.namespace_isolation["zabbix"]' 'zabbix/zabbix-isolation' >/dev/null 2>&1 || true
+          
+          echo "✅ Resource import process completed"
+          
+      - name: Verify Terraform State
+        shell: bash 
+        run: |
+          echo "📋 Current Kubernetes resources in Terraform state:"
+          terraform state list | grep kubernetes || echo "No Kubernetes resources found in state"
+          
+          echo ""
+          echo "🔍 Running terraform plan to check for conflicts..."
+          terraform plan -no-color | head -50
