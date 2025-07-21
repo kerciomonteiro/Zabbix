@@ -1,18 +1,19 @@
-# Application Gateway Ingress for Zabbix
+# Application Gateway Ingress for Zabbix - AGIC Compatible
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: zabbix-ingress
+  name: zabbix-agic-ingress
   namespace: zabbix
   annotations:
-    # Application Gateway Ingress Controller specific annotations
+    # Explicit AGIC annotations (no deprecated kubernetes.io/ingress.class)
     appgw.ingress.kubernetes.io/backend-protocol: "http"
     appgw.ingress.kubernetes.io/ssl-redirect: "false"
     appgw.ingress.kubernetes.io/health-probe-path: "/index.php"
     appgw.ingress.kubernetes.io/connection-draining: "true"
     appgw.ingress.kubernetes.io/connection-draining-timeout: "30"
+    appgw.ingress.kubernetes.io/request-timeout: "30"
   labels:
-    app: zabbix-ingress
+    app: zabbix-agic-ingress
 spec:
   ingressClassName: azure-application-gateway
   rules:
@@ -23,12 +24,12 @@ spec:
         pathType: Prefix
         backend:
           service:
-            name: zabbix-web
+            name: zabbix-web-external
             port:
               number: 80
 
 ---
-# Service for Application Gateway Backend Pool
+# Enhanced LoadBalancer Service for Application Gateway Backend Pool
 apiVersion: v1
 kind: Service
 metadata:
@@ -36,6 +37,11 @@ metadata:
   namespace: zabbix
   labels:
     app: zabbix-web
+  annotations:
+    # Service annotations for better Application Gateway integration
+    service.beta.kubernetes.io/azure-load-balancer-health-probe-request-path: "/index.php"
+    service.beta.kubernetes.io/azure-load-balancer-health-probe-interval: "5"
+    service.beta.kubernetes.io/azure-load-balancer-health-probe-num-of-probe: "2"
 spec:
   ports:
   - name: http
@@ -46,4 +52,4 @@ spec:
     app: zabbix-web
   type: LoadBalancer
   loadBalancerSourceRanges:
-  - 0.0.0.0/0  # Allow access from anywhere - restrict as needed
+  - 0.0.0.0/0  # Allow access from anywhere - restrict as needed for production

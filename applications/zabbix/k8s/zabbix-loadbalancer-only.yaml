@@ -1,0 +1,52 @@
+# Simple LoadBalancer Service for Zabbix Web - No Ingress Required
+# This bypasses any ingress controller certificate validation issues
+apiVersion: v1
+kind: Service
+metadata:
+  name: zabbix-web-loadbalancer
+  namespace: zabbix
+  labels:
+    app: zabbix-web
+  annotations:
+    # LoadBalancer service annotations for Azure
+    service.beta.kubernetes.io/azure-load-balancer-health-probe-request-path: "/index.php"
+    service.beta.kubernetes.io/azure-load-balancer-health-probe-interval: "5"
+    service.beta.kubernetes.io/azure-load-balancer-health-probe-num-of-probe: "2"
+    service.beta.kubernetes.io/azure-dns-label-name: "dal2-devmon-mgt-devops"  # This should match your domain
+spec:
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+    protocol: TCP
+  selector:
+    app: zabbix-web
+  type: LoadBalancer
+  loadBalancerSourceRanges:
+  - 0.0.0.0/0  # Allow access from anywhere - restrict as needed for production
+
+---
+# Network Policy to ensure Application Gateway can reach the service
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-appgw-to-zabbix
+  namespace: zabbix
+spec:
+  podSelector:
+    matchLabels:
+      app: zabbix-web
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: TCP
+      port: 8080
+  - from: []  # Allow from all sources for LoadBalancer access
+    ports:
+    - protocol: TCP
+      port: 8080
