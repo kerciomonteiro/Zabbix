@@ -54,3 +54,20 @@ secrets/
 # Azure specific
 .azure-pipelines/
 azuredeploy.parameters.local.json
+
+# Troubleshooting and temporary documentation files
+# These are generated during issue resolution and shouldn't be in the main repo
+TERRAFORM_*.md
+WORKFLOW_*.md
+ZABBIX-*.md
+NODE_POOL_*.md
+NGINX_*.md
+KUBERNETES_*.md
+PLATFORM-*.md
+REPOSITORY-*.md
+troubleshooting-*.md
+*-SUMMARY.md
+*-SUCCESS.md
+*-FIX.md
+*-RESOLUTION.md
+scripts/terraform/RECOVERY-*.md
