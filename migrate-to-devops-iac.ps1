@@ -97,28 +97,32 @@ Write-Host "🔄 Step 5: Preparing clean commit..." -ForegroundColor Cyan
 git add -A
 
 # Commit the cleanup
-git commit -m "🚀 INITIAL DEVOPS-IAC REPOSITORY
+$commitMessage = @"
+🚀 INITIAL DEVOPS-IAC REPOSITORY
 
 ✅ CLEAN PROFESSIONAL REPOSITORY:
-- Removed all troubleshooting documentation
-- Updated README for DevOps-IAC focus
-- Professional documentation and structure
-- Production-ready Infrastructure as Code
+• Removed all troubleshooting documentation
+• Updated README for DevOps-IAC focus
+• Professional documentation and structure
+• Production-ready Infrastructure as Code
 
 📦 INCLUDED COMPONENTS:
-- Complete Terraform infrastructure
-- Kubernetes manifests for Zabbix stack
-- GitHub Actions CI/CD workflows
-- Automated deployment and recovery scripts
-- Comprehensive documentation
+• Complete Terraform infrastructure
+• Kubernetes manifests for Zabbix stack
+• GitHub Actions CI/CD workflows
+• Automated deployment and recovery scripts
+• Comprehensive documentation
 
 🎯 READY FOR PRODUCTION:
-- Enterprise-grade IaC templates
-- Automated Zabbix monitoring deployment
-- Professional DevOps workflows
-- Complete Azure AKS solution
+• Enterprise-grade IaC templates
+• Automated Zabbix monitoring deployment
+• Professional DevOps workflows
+• Complete Azure AKS solution
 
-Repository migrated from Zabbix troubleshooting to clean DevOps-IAC"
+Repository migrated from Zabbix troubleshooting to clean DevOps-IAC
+"@
+
+git commit -m $commitMessage
 
 Write-Host "✅ Clean commit created" -ForegroundColor Green
 Write-Host ""
